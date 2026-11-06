@@ -351,6 +351,7 @@ private fun BrowserScreen(
                             url: String,
                             favicon: android.graphics.Bitmap?
                         ) {
+                            view.tag = url
                             onPageChanged(url, view.title.orEmpty())
                         }
 
@@ -382,7 +383,7 @@ private fun BrowserScreen(
                     setDownloadListener { downloadUrl, userAgent, contentDisposition, mimeType, _ ->
                         val cookies = CookieManager.getInstance().getCookie(downloadUrl)
                         onDirectDownload(
-                            downloadUrl, userAgent.orEmpty(), cookies, url,
+                            downloadUrl, userAgent.orEmpty(), cookies, view.url.orEmpty(),
                             contentDisposition, mimeType
                         )
                     }

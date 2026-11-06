@@ -25,13 +25,18 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
+      - name: Build APK
         working-directory: NET-SPEED
+        env:
+          NETSPEED_KEYSTORE_BASE64: ${{ secrets.NETSPEED_KEYSTORE_BASE64 }}
+          NETSPEED_STORE_PASSWORD: ${{ secrets.NETSPEED_STORE_PASSWORD }}
+          NETSPEED_KEY_ALIAS: ${{ secrets.NETSPEED_KEY_ALIAS }}
+          NETSPEED_KEY_PASSWORD: ${{ secrets.NETSPEED_KEY_PASSWORD }}
         run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NET-SPEED-by-Astra-debug
+          name: NET-SPEED-by-Astra
           path: NET-SPEED/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

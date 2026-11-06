@@ -108,6 +108,8 @@ private fun AstraVideoApp() {
                         icon = { Icon(Icons.Default.PlayCircle, null) }, label = { Text("Плеер") })
                     NavigationBarItem(selected = tab == 2, onClick = { tab = 2 },
                         icon = { Icon(Icons.Default.Download, null) }, label = { Text("Загрузки") })
+                    NavigationBarItem(selected = tab == 3, onClick = { tab = 3 },
+                        icon = { Icon(Icons.Default.Language, null) }, label = { Text("SaveFrom") })
                 }
             }
         ) { padding ->
@@ -213,7 +215,8 @@ private fun AstraVideoApp() {
                             }
                         }
                     }
-                    else -> DownloadsScreen()
+                    2 -> DownloadsScreen()
+                    else -> SaveFromScreen()
                 }
             }
         }
@@ -484,6 +487,78 @@ private fun InputPanel(value: String, onValueChange: (String) -> Unit, hint: Str
             decorationBox = { inner ->
                 if (value.isEmpty()) Text(hint, color = Muted, fontSize = 14.sp)
                 inner()
+            }
+        )
+    }
+}
+
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun SaveFromScreen() {
+    val context = LocalContext.current
+    var loadError by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("SaveFrom", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Вставь ссылку на видео на сайте", color = Muted, fontSize = 11.sp)
+            }
+            TextButton(onClick = { loadError = "" }) { Text("Обновить", color = Accent) }
+        }
+        if (loadError.isNotBlank()) Text(loadError, color = Accent, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.loadsImagesAutomatically = true
+                    settings.javaScriptCanOpenWindowsAutomatically = true
+                    settings.setSupportMultipleWindows(false)
+                    webChromeClient = WebChromeClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+                            if (request.isForMainFrame) loadError = "Не удалось открыть SaveFrom"
+                        }
+                    }
+                    setDownloadListener { downloadUrl, userAgent, contentDisposition, mimeType, _ ->
+                        try {
+                            val uri = Uri.parse(downloadUrl)
+                            if (uri.scheme != "https" && uri.scheme != "http") {
+                                Toast.makeText(ctx, "Неподдерживаемая ссылка загрузки", Toast.LENGTH_LONG).show()
+                                return@setDownloadListener
+                            }
+                            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Astra Video")
+                            if (!dir.exists()) dir.mkdirs()
+                            val guessed = android.webkit.URLUtil.guessFileName(downloadUrl, contentDisposition, mimeType)
+                            val cleanName = guessed.ifBlank { "savefrom_video.mp4" }.map {
+                                if (it.isLetterOrDigit() || it in "._- ()") it else '_'
+                            }.joinToString("")
+                            val request = DownloadManager.Request(uri)
+                                .setTitle(cleanName)
+                                .setDescription("SaveFrom • Astra Video")
+                                .setMimeType(mimeType ?: "application/octet-stream")
+                                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                .setAllowedOverMetered(true)
+                                .setAllowedOverRoaming(false)
+                                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Astra Video/$cleanName")
+                            if (!userAgent.isNullOrBlank()) request.addRequestHeader("User-Agent", userAgent)
+                            val cookies = android.webkit.CookieManager.getInstance().getCookie(downloadUrl)
+                            if (!cookies.isNullOrBlank()) request.addRequestHeader("Cookie", cookies)
+                            request.addRequestHeader("Referer", "https://ru.savefrom.net/")
+                            val manager = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                            manager.enqueue(request)
+                            Toast.makeText(ctx, "Скачивание началось: $cleanName", Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(ctx, "Ошибка запуска загрузки", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    loadUrl("https://ru.savefrom.net/247hU/")
+                }
+            },
+            update = { view ->
+                if (view.url.isNullOrBlank()) view.loadUrl("https://ru.savefrom.net/247hU/")
             }
         )
     }

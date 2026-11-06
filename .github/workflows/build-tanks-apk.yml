@@ -1,0 +1,43 @@
+name: Build TANKS by Astra APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android-app/**"
+      - "tank-city/index.html"
+      - ".github/workflows/build-tanks-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy latest game into Android app
+        run: cp tank-city/index.html android-app/app/src/main/assets/index.html
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build debug APK
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: "8.9"
+          build-root-directory: android-app
+          arguments: assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TANKS-by-Astra-APK
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

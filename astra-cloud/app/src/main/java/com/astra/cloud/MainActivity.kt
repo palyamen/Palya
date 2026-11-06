@@ -201,7 +201,7 @@ private fun AstraCloudScreen() {
                         items(files, key = { it.file.name }) { item ->
                             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(17.dp)) {
                                 Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.size(42.dp).background(Color(0xFF183653), 13.dp), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(42.dp).background(Color(0xFF183653), RoundedCornerShape(13.dp)), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.InsertDriveFile, null, tint = Blue)
                                     }
                                     Spacer(Modifier.width(11.dp))

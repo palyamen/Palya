@@ -38,6 +38,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.core:core-ktx:1.15.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
-    implementation("io.github.junkfood02.youtubedl-android:library:0.16.0")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.16.0")
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 }

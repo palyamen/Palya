@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -62,7 +64,7 @@ private fun AstraCloudScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val vault = remember { File(context.filesDir, "vault").apply { mkdirs() } }
-    var files by remember { mutableStateOf(vault.listFiles()?.filter { it.isFile && it.extension == "acrypt" }?.map { VaultFile(it) } ?: emptyList()) }
+    var files by remember { mutableStateOf<List<VaultFile>>(vault.listFiles()?.filter { it.isFile && it.extension == "acrypt" }?.map { VaultFile(it) } ?: emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("Файлы шифруются на этом устройстве") }
 
@@ -127,7 +129,7 @@ private fun AstraCloudScreen() {
         }
     }
 
-    val used = files.sumOf { it.size }
+    val used: Long = files.fold(0L) { total, item -> total + item.size }
     val usedMb = used / (1024f * 1024f)
 
     MaterialTheme(colorScheme = darkColorScheme(

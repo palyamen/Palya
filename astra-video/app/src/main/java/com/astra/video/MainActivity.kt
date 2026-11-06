@@ -44,6 +44,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.yausername.youtubedl_android.YoutubeDLException
+import com.yausername.ffmpeg.FFmpeg
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -59,6 +64,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = AndroidColor.rgb(11, 13, 18)
         window.navigationBarColor = AndroidColor.rgb(11, 13, 18)
+        try {
+            YoutubeDL.getInstance().init(this)
+            FFmpeg.getInstance().init(this)
+        } catch (e: YoutubeDLException) {
+            Toast.makeText(this, "Модуль загрузки видео не запустился: ${e.message}", Toast.LENGTH_LONG).show()
+        }
         setContent { AstraVideoApp() }
     }
 }
@@ -231,6 +242,7 @@ private fun DownloadsScreen() {
     var refreshKey by remember { mutableIntStateOf(0) }
     var checking by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
+    var extractorProgress by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(Unit) {
         while (true) { delay(1200); refreshKey++ }
@@ -270,11 +282,11 @@ private fun DownloadsScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("Загрузки", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Text("Скачивай прямые ссылки на видео- и аудиофайлы. Ссылки на страницы YouTube и других сайтов не являются видеофайлами.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+        Text("Вставь ссылку YouTube (включая m.youtube.com) или прямую ссылку на медиафайл.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
         Spacer(Modifier.height(18.dp))
-        Text("Прямая ссылка на видео или аудио", color = Color.White, fontWeight = FontWeight.SemiBold)
+        Text("Ссылка на видео", color = Color.White, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
-        InputPanel(value = url, onValueChange = { url = it }, hint = "https://сайт.ru/video.mp4")
+        InputPanel(value = url, onValueChange = { url = it }, hint = "https://m.youtube.com/watch?v=...")
         Spacer(Modifier.height(12.dp))
         Text("Имя файла (необязательно)", color = Color.White, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -287,7 +299,35 @@ private fun DownloadsScreen() {
                 if ((parsed.scheme == "https" || parsed.scheme == "http") && !parsed.host.isNullOrBlank()) {
                     scope.launch {
                         checking = true
-                        message = "Проверяю ссылку и тип файла…"
+                        val host = parsed.host.orEmpty().lowercase(Locale.ROOT)
+                        val isYouTube = host == "youtu.be" || host == "youtube.com" || host.endsWith(".youtube.com")
+                        if (isYouTube) {
+                            message = "Распознала YouTube. Получаю варианты видео…"
+                            extractorProgress = 0f
+                            val result = withContext(Dispatchers.IO) {
+                                try {
+                                    val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Astra Video")
+                                    if (!dir.exists()) dir.mkdirs()
+                                    val request = YoutubeDLRequest(enteredUrl)
+                                    request.addOption("--no-playlist")
+                                    request.addOption("--no-mtime")
+                                    request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
+                                    request.addOption("--merge-output-format", "mp4")
+                                    request.addOption("-o", dir.absolutePath + "/%(title).180B.%(ext)s")
+                                    YoutubeDL.getInstance().execute(request, "astra-video-download") { progress, _, line ->
+                                        extractorProgress = progress.coerceIn(0f, 100f)
+                                        message = if (line.isNotBlank()) line.takeLast(180) else "Скачиваю видео…"
+                                    }
+                                    "Готово! Файл сохранён в Загрузки/Astra Video."
+                                } catch (e: Exception) {
+                                    "Не удалось скачать видео: " + (e.message ?: "ошибка извлечения").take(220)
+                                }
+                            }
+                            message = result
+                            checking = false
+                            refreshKey++
+                        } else {
+                        message = "Проверяю прямую ссылку и тип файла…"
                         val check = withContext(Dispatchers.IO) {
                             try {
                                 val connection = (URL(enteredUrl).openConnection() as HttpURLConnection).apply {
@@ -338,6 +378,7 @@ private fun DownloadsScreen() {
                             message = "Сервер вернул ошибку HTTP $code. Проверь ссылку."
                         }
                         checking = false
+                        }
                     }
                 } else { message = "Введи корректную http/https-ссылку." }
             },
@@ -357,6 +398,10 @@ private fun DownloadsScreen() {
         }
         if (message.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
+            if (extractorProgress > 0f && extractorProgress < 100f) {
+                LinearProgressIndicator(progress = { extractorProgress / 100f }, modifier = Modifier.fillMaxWidth(), color = Accent)
+                Text("YouTube: ${extractorProgress.toInt()}%", color = Muted, fontSize = 11.sp)
+            }
             Text(message, color = if (message.contains("отменена") || message.contains("ошибку") || message.contains("страница")) Accent else Muted, fontSize = 12.sp, lineHeight = 17.sp)
         }
         Spacer(Modifier.height(22.dp))
@@ -417,7 +462,7 @@ private fun DownloadsScreen() {
             }
         }
         Spacer(Modifier.height(10.dp))
-        Text("Важно: приложение не извлекает видео из страниц YouTube. Нужен прямой адрес самого файла, например .mp4 или .webm. Перед скачиванием Astra Video проверяет ответ сервера, показывает размер и тип файла.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+        Text("YouTube-ссылки обрабатываются встроенным yt-dlp. Скачивай только материалы, на которые у тебя есть права или разрешение владельца. Прямые ссылки на MP4/WebM по-прежнему поддерживаются.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
     }
 }
 

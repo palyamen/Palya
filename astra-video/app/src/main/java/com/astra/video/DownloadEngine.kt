@@ -20,11 +20,11 @@ object DownloadEngine {
     private suspend fun ensureEngineUpdated(context: Context) {
         updateMutex.withLock {
             if (!engineUpdated) {
-                // NIGHTLY follows current yt-dlp extractor fixes; the Android wrapper
+                // STABLE tracks the latest official yt-dlp release; the Android wrapper
                 // downloads the updated executable without requiring an app reinstall.
                 YoutubeDL.getInstance().updateYoutubeDL(
                     context,
-                    YoutubeDL.UpdateChannel._NIGHTLY
+                    YoutubeDL.UpdateChannel._STABLE
                 )
                 engineUpdated = true
             }

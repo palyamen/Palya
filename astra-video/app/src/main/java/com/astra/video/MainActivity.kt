@@ -3,6 +3,8 @@ package com.astra.video
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Bundle
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -58,6 +61,14 @@ private fun AstraVideoApp() {
     var query by remember { mutableStateOf("") }
     var pageUrl by remember { mutableStateOf("") }
     var videoUrl by remember { mutableStateOf("") }
+    var shareUrl by remember { mutableStateOf("") }
+    var showAppHeader by remember { mutableStateOf(true) }
+
+    LaunchedEffect(tab) {
+        showAppHeader = true
+        kotlinx.coroutines.delay(4000)
+        showAppHeader = false
+    }
 
     BackHandler(enabled = tab != 0) {
         tab = 0
@@ -81,7 +92,7 @@ private fun AstraVideoApp() {
             }
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
-                Row(
+                if (showAppHeader) Row(
                     Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -124,6 +135,8 @@ private fun AstraVideoApp() {
                         if (pageUrl.isNotEmpty()) {
                             YoutubeWebView(url = pageUrl, onVideo = { url ->
                                 videoUrl = url
+                                val id = Uri.parse(url).lastPathSegment
+                                shareUrl = if (!id.isNullOrBlank()) "https://www.youtube.com/watch?v=$id" else url
                                 tab = 1
                             }, modifier = Modifier.weight(1f))
                         } else {
@@ -140,7 +153,35 @@ private fun AstraVideoApp() {
                     }
                     1 -> {
                         if (videoUrl.isNotBlank()) {
-                            YoutubeWebView(url = videoUrl, onVideo = { videoUrl = it }, modifier = Modifier.fillMaxSize())
+                            Column(Modifier.fillMaxSize()) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                                        .background(Panel, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = shareUrl.ifBlank { videoUrl },
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    val context = LocalContext.current
+                                    IconButton(onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("Ссылка на видео", shareUrl.ifBlank { videoUrl }))
+                                        Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Icon(Icons.Default.ContentCopy, "Скопировать ссылку", tint = Accent)
+                                    }
+                                }
+                                YoutubeWebView(url = videoUrl, onVideo = { url ->
+                                    videoUrl = url
+                                    val id = Uri.parse(url).lastPathSegment
+                                    shareUrl = if (!id.isNullOrBlank()) "https://www.youtube.com/watch?v=$id" else url
+                                }, modifier = Modifier.weight(1f))
+                            }
                         } else {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

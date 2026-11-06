@@ -1,0 +1,39 @@
+name: Build Astra Video APK
+
+on:
+  push:
+    branches: [astra-video]
+    paths:
+      - "astra-video/**"
+      - ".github/workflows/build-astra-video.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build debug APK
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: "8.9"
+          build-root-directory: astra-video
+          arguments: assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Astra-Video-debug
+          path: astra-video/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

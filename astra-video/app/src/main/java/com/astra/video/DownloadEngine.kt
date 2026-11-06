@@ -6,12 +6,30 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 
 object DownloadEngine {
     private val slots = Semaphore(3)
+    private val updateMutex = Mutex()
+    @Volatile private var engineUpdated = false
+
+    private suspend fun ensureEngineUpdated(context: Context) {
+        updateMutex.withLock {
+            if (!engineUpdated) {
+                // NIGHTLY follows current yt-dlp extractor fixes; the Android wrapper
+                // downloads the updated executable without requiring an app reinstall.
+                YoutubeDL.getInstance().updateYoutubeDL(
+                    context,
+                    YoutubeDL.UpdateChannel._NIGHTLY
+                )
+                engineUpdated = true
+            }
+        }
+    }
 
     fun outputDirectory(context: Context): File {
         val base = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
@@ -29,6 +47,8 @@ object DownloadEngine {
         audioOnly: Boolean = false,
         onProgress: (Float, String) -> Unit
     ): File = withContext(Dispatchers.IO) {
+        onProgress(0f, "Обновляю движок загрузки…")
+        ensureEngineUpdated(context)
         slots.withPermit {
             val directory = outputDirectory(context)
             // Изолируем результат каждой задачи: параллельные загрузки не должны

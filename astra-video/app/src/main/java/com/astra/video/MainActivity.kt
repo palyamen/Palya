@@ -99,7 +99,7 @@ private fun AstraVideoApp() {
     fun launchTask(task: ActiveTask) {
         task.pauseRequested = false
         task.cancelRequested = false
-        task.processId = task.id + "-" + System.currentTimeMillis()
+        task.processId = task.id
         task.status = "В очереди"
         task.job = scope.launch {
             try {

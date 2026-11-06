@@ -6,12 +6,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -20,7 +17,6 @@ import android.widget.TextView
 class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("net_speed", MODE_PRIVATE) }
     private lateinit var status: TextView
-    private lateinit var permissionStatus: TextView
     private lateinit var start: Button
     private lateinit var stop: Button
 
@@ -49,7 +45,6 @@ class MainActivity : Activity() {
             setPadding(dp(22), dp(26), dp(22), dp(24))
             background = gradient(intArrayOf(0xFF071329.toInt(), 0xFF0B1D38.toInt()), 0)
         }
-
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             addView(root)
@@ -64,7 +59,7 @@ class MainActivity : Activity() {
             letterSpacing = 0.08f
         }
         val subtitle = TextView(this).apply {
-            text = "by Astra  ✦"
+            text = "by Astra  ✦  версия 2.1"
             textSize = 16f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(cyan)
@@ -82,11 +77,15 @@ class MainActivity : Activity() {
         val speedCaption = text("ТЕКУЩАЯ СКОРОСТЬ", 12f, muted, true).apply {
             letterSpacing = 0.12f
         }
-        val speedValue = text("↓  ЗАГРУЗКА     ↑  ОТДАЧА", 13f, white, true)
+        val speedValue = text("↓  ЗАГРУЗКА     ↑  ОТДАЧА", 15f, white, true)
+        val speedHint = text("Скорость отображается в уведомлении Android", 13f, muted, false)
         speedCard.addView(speedCaption, matchWidth())
         speedCard.addView(speedValue, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(14) })
+        speedCard.addView(speedHint, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(10) })
         root.addView(speedCard, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(28) })
@@ -96,21 +95,25 @@ class MainActivity : Activity() {
             setPadding(dp(18), dp(18), dp(18), dp(18))
             background = rounded(0xFF0D203B.toInt(), 22, 0xFF1B4168.toInt(), 1)
         }
-        val stateTitle = text("УПРАВЛЕНИЕ ИНДИКАТОРОМ", 12f, muted, true)
+        val stateTitle = text("СОСТОЯНИЕ ИНДИКАТОРА", 12f, muted, true)
         status = text("Индикатор выключен", 17f, white, true).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(12), 0, dp(5))
         }
-        permissionStatus = text("", 13f, muted, false)
         stateCard.addView(stateTitle, matchWidth())
         stateCard.addView(status, matchWidth())
-        stateCard.addView(permissionStatus, matchWidth())
         root.addView(stateCard, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(18) })
 
         start = pillButton("ВКЛЮЧИТЬ ИНДИКАТОР", cyan, navy)
-        start.setOnClickListener { enableOverlay() }
+        start.setOnClickListener {
+            prefs.edit().putBoolean("enabled", true).apply()
+            val intent = Intent(this@MainActivity, SpeedService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+            else startService(intent)
+            refreshStatus()
+        }
         stop = pillButton("ВЫКЛЮЧИТЬ ИНДИКАТОР", 0xFF203B59.toInt(), white)
         stop.setOnClickListener {
             prefs.edit().putBoolean("enabled", false).apply()
@@ -124,38 +127,15 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.MATCH_PARENT, dp(56)
         ).apply { topMargin = dp(12) })
 
-        val settings = pillButton("РАЗРЕШЕНИЕ ПОВЕРХ ОКОН", 0xFF142D4B.toInt(), cyan)
-        settings.setOnClickListener { openOverlaySettings() }
-        root.addView(settings, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(52)
-        ).apply { topMargin = dp(12) })
-
-        val footer = text("Лёгкий индикатор скорости интернета", 12f, muted, false).apply {
+        val footer = text(
+            "Без плавающих окон и специальных разрешений. Открой шторку уведомлений, чтобы увидеть скорость.",
+            12f, muted, false
+        ).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(26), 0, 0)
         }
         root.addView(footer, matchWidth())
         setContentView(scroll)
-    }
-
-    private fun enableOverlay() {
-        if (!Settings.canDrawOverlays(this)) {
-            openOverlaySettings()
-            return
-        }
-        prefs.edit().putBoolean("enabled", true).apply()
-        val intent = Intent(this, SpeedService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-        else startService(intent)
-        refreshStatus()
-    }
-
-    private fun openOverlaySettings() {
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:$packageName")
-        )
-        startActivity(intent)
     }
 
     private fun askNotificationPermission() {
@@ -168,10 +148,8 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         val enabled = prefs.getBoolean("enabled", false)
-        val allowed = Settings.canDrawOverlays(this)
         status.text = if (enabled) "●  Индикатор включён" else "○  Индикатор выключен"
         status.setTextColor(if (enabled) green else white)
-        permissionStatus.text = if (allowed) "Разрешение поверх окон: выдано" else "Разрешение поверх окон: требуется"
         start.alpha = if (enabled) 0.55f else 1f
         stop.alpha = if (enabled) 1f else 0.55f
     }

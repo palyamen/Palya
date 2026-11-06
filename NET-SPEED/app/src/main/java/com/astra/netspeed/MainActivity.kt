@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -113,8 +112,9 @@ class MainActivity : Activity() {
     private fun refreshStatus() {
         val enabled = prefs.getBoolean("enabled", false)
         val allowed = Settings.canDrawOverlays(this)
-        status.text = "Индикатор: " + if (enabled) "включён" else "выключен" +
-            "\nРазрешение поверх окон: " + if (allowed) "есть" else "нужно выдать"
+        val state = if (enabled) "включён" else "выключен"
+        val permission = if (allowed) "есть" else "нужно выдать"
+        status.text = "Индикатор: $state\nРазрешение поверх окон: $permission"
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

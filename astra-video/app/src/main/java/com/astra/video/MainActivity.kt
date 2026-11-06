@@ -1,7 +1,6 @@
 package com.astra.video
 
 import android.annotation.SuppressLint
-import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -39,9 +38,11 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import java.util.UUID
 
 private val AppBack = Color(0xFF0B0D12)
 private val AppPanel = Color(0xFF171B25)
@@ -63,19 +64,23 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private class ActiveTask(val id: String, val title: String) {
+private class ActiveTask(
+    val id: String,
+    val title: String,
+    val url: String,
+    val userAgent: String?,
+    val cookies: String?,
+    val referer: String?,
+    val audioOnly: Boolean = false
+) {
+    var processId by mutableStateOf(id)
     var progress by mutableFloatStateOf(0f)
     var status by mutableStateOf("В очереди")
     var detail by mutableStateOf("")
+    var pauseRequested by mutableStateOf(false)
+    var cancelRequested by mutableStateOf(false)
+    var job: Job? = null
 }
-
-private data class SystemDownload(
-    val id: Long,
-    val title: String,
-    val status: String,
-    val done: Long,
-    val total: Long
-)
 
 @Composable
 private fun AstraVideoApp() {
@@ -90,17 +95,21 @@ private fun AstraVideoApp() {
     val candidates = remember { mutableStateListOf<MediaCandidate>() }
     val tasks = remember { mutableStateListOf<ActiveTask>() }
 
-    fun startPageDownload(page: String, title: String) {
-        if (tasks.any { it.status == "Скачивается" && it.title == title }) return
-        val task = ActiveTask(System.currentTimeMillis().toString(), title.ifBlank { "Видео со страницы" })
-        tasks.add(0, task)
-        scope.launch {
-            task.status = "Анализирую страницу"
+    fun launchTask(task: ActiveTask) {
+        task.pauseRequested = false
+        task.cancelRequested = false
+        task.processId = task.id + "-" + System.currentTimeMillis()
+        task.status = "В очереди"
+        task.job = scope.launch {
             try {
-                val file = DownloadEngine.downloadPage(context, page) { progress, line ->
+                task.status = "Анализирую источник"
+                val file = DownloadEngine.download(
+                    context, task.url, task.processId, task.userAgent, task.cookies,
+                    task.referer, task.audioOnly
+                ) { progress, line ->
                     scope.launch(Dispatchers.Main) {
                         task.progress = progress
-                        task.status = if (progress > 0f) "Скачивается" else "Анализирую страницу"
+                        task.status = if (progress > 0f) "Скачивается" else "Анализирую источник"
                         task.detail = line
                     }
                 }
@@ -110,34 +119,50 @@ private fun AstraVideoApp() {
                 refreshKey++
                 Toast.makeText(context, "Сохранено: " + file.name, Toast.LENGTH_LONG).show()
             } catch (error: Exception) {
-                task.status = "Ошибка"
-                task.detail = error.message ?: "Не удалось получить видео"
+                when {
+                    task.pauseRequested -> task.status = "Пауза"
+                    task.cancelRequested -> task.status = "Отменено"
+                    else -> {
+                        task.status = "Ошибка"
+                        task.detail = error.message ?: "Не удалось получить медиа"
+                    }
+                }
             }
         }
     }
 
-    fun startDirectDownload(
+    fun enqueueDownload(
         url: String,
-        userAgent: String,
-        cookies: String?,
-        referer: String?,
-        contentDisposition: String?,
-        mimeType: String?
+        title: String,
+        userAgent: String? = null,
+        cookies: String? = null,
+        referer: String? = null,
+        audioOnly: Boolean = false
     ) {
-        val path = Uri.parse(url).encodedPath.orEmpty().lowercase(Locale.ROOT)
-        if (path.endsWith(".m3u8") || path.endsWith(".mpd")) {
-            startPageDownload(url, "Потоковое видео")
-            return
-        }
-        try {
-            val item = DownloadEngine.enqueueDirect(
-                context, url, userAgent, cookies, referer, mimeType, contentDisposition
-            )
-            Toast.makeText(context, "Загрузка добавлена: " + item.title, Toast.LENGTH_SHORT).show()
-            refreshKey++
-        } catch (error: Exception) {
-            Toast.makeText(context, "Не удалось начать загрузку: " + error.message, Toast.LENGTH_LONG).show()
-        }
+        val task = ActiveTask(
+            UUID.randomUUID().toString(), title.ifBlank { "Медиафайл" },
+            url, userAgent, cookies, referer, audioOnly
+        )
+        tasks.add(0, task)
+        launchTask(task)
+    }
+
+    fun pauseTask(task: ActiveTask) {
+        task.pauseRequested = true
+        task.status = "Приостанавливаю"
+        DownloadEngine.stop(task.processId)
+        task.job?.cancel()
+    }
+
+    fun resumeTask(task: ActiveTask) {
+        launchTask(task)
+    }
+
+    fun cancelTask(task: ActiveTask) {
+        task.cancelRequested = true
+        task.status = "Отменяю"
+        DownloadEngine.stop(task.processId)
+        task.job?.cancel()
     }
 
     BackHandler(enabled = selectedFile != null || tab != 0) {
@@ -209,20 +234,15 @@ private fun AstraVideoApp() {
                             onMediaFound = { candidate ->
                                 if (candidates.none { it.url == candidate.url }) candidates.add(candidate)
                             },
-                            onDownloadPage = { startPageDownload(currentPage, pageTitle) },
+                            onDownloadPage = { enqueueDownload(currentPage, pageTitle, referer = currentPage) },
                             onDownloadCandidate = { candidate ->
-                                if (candidate.kind.contains("поток")) {
-                                    startPageDownload(candidate.url, candidate.kind)
-                                } else {
-                                    startDirectDownload(
-                                        candidate.url, "Mozilla/5.0 AstraVideo",
-                                        CookieManager.getInstance().getCookie(candidate.url),
-                                        currentPage, null, null
-                                    )
-                                }
+                                enqueueDownload(
+                                    candidate.url, candidate.kind, "Mozilla/5.0 AstraVideo",
+                                    CookieManager.getInstance().getCookie(candidate.url), currentPage
+                                )
                             },
                             onDirectDownload = { url, agent, cookies, referer, disposition, mime ->
-                                startDirectDownload(url, agent, cookies, referer, disposition, mime)
+                                enqueueDownload(url, "Медиафайл", agent, cookies, referer)
                             }
                         )
                         1 -> DownloadsScreen(tasks, refreshKey, onRefresh = { refreshKey++ })
@@ -434,41 +454,11 @@ private fun BrowserScreen(
 private fun DownloadsScreen(
     tasks: SnapshotStateList<ActiveTask>,
     refreshKey: Int,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onPause: (ActiveTask) -> Unit,
+    onResume: (ActiveTask) -> Unit,
+    onCancel: (ActiveTask) -> Unit
 ) {
-    val context = LocalContext.current
-    val directDownloads = remember(refreshKey) {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val values = mutableListOf<SystemDownload>()
-        manager.query(DownloadManager.Query())?.use { cursor ->
-            val idCol = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
-            val titleCol = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-            val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-            val doneCol = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-            val totalCol = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-            while (cursor.moveToNext()) {
-                val status = when (cursor.getInt(statusCol)) {
-                    DownloadManager.STATUS_SUCCESSFUL -> "Готово"
-                    DownloadManager.STATUS_FAILED -> "Ошибка"
-                    DownloadManager.STATUS_RUNNING -> "Скачивается"
-                    DownloadManager.STATUS_PENDING -> "В очереди"
-                    DownloadManager.STATUS_PAUSED -> "Пауза"
-                    else -> "Неизвестно"
-                }
-                values.add(
-                    SystemDownload(
-                        cursor.getLong(idCol),
-                        cursor.getString(titleCol) ?: "Файл",
-                        status,
-                        cursor.getLong(doneCol),
-                        cursor.getLong(totalCol)
-                    )
-                )
-            }
-        }
-        values.reversed()
-    }
-
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(1000)
@@ -481,51 +471,42 @@ private fun DownloadsScreen(
             Text("Загрузки", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Обновить", tint = AppAccent) }
         }
-        Text("Активные задачи", color = AppMuted, fontSize = 12.sp)
-        LazyColumn(Modifier.weight(1f)) {
-            items(tasks, key = { it.id }) { task ->
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
-                        .background(AppPanel, RoundedCornerShape(14.dp)).padding(13.dp)
-                ) {
-                    Text(task.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
-                    Text(task.status, color = if (task.status == "Ошибка") AppAccent else AppMuted, fontSize = 12.sp)
-                    if (task.status == "Скачивается" || task.progress > 0f) {
-                        LinearProgressIndicator(
-                            progress = { task.progress / 100f },
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            color = AppAccent
-                        )
-                    }
-                    if (task.detail.isNotBlank()) {
-                        Text(task.detail, color = AppMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
+        Text("До трёх одновременных задач. Незавершённые файлы можно продолжить.", color = AppMuted, fontSize = 12.sp)
+        Spacer(Modifier.height(10.dp))
+        if (tasks.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Пока загрузок нет", color = AppMuted)
             }
-            item {
-                Spacer(Modifier.height(12.dp))
-                Text("Загрузки Android", color = AppMuted, fontSize = 12.sp)
-            }
-            items(directDownloads, key = { it.id }) { item ->
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
-                        .background(AppPanel, RoundedCornerShape(14.dp)).padding(13.dp)
-                ) {
-                    Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(item.status, color = AppMuted, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                        Text(formatBytes(item.done) + " / " + formatBytes(item.total), color = AppMuted, fontSize = 10.sp)
-                    }
-                    if (item.status == "Скачивается" && item.total > 0) {
-                        LinearProgressIndicator(
-                            progress = { (item.done.toFloat() / item.total).coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
-                            color = AppAccent
-                        )
-                    }
-                    if (item.status == "Ошибка") {
-                        TextButton(onClick = { DownloadEngine.cancelDirect(context, item.id); onRefresh() }) {
-                            Text("Удалить задачу", color = AppAccent)
+        } else {
+            LazyColumn {
+                items(tasks, key = { it.id }) { task ->
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                            .background(AppPanel, RoundedCornerShape(14.dp)).padding(13.dp)
+                    ) {
+                        Text(task.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
+                        Text(task.status, color = if (task.status == "Ошибка") AppAccent else AppMuted, fontSize = 12.sp)
+                        if (task.progress > 0f || task.status == "Скачивается") {
+                            LinearProgressIndicator(
+                                progress = { task.progress / 100f },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                color = AppAccent
+                            )
+                            Text(task.progress.toInt().toString() + "%", color = AppMuted, fontSize = 10.sp)
+                        }
+                        if (task.detail.isNotBlank()) {
+                            Text(task.detail, color = AppMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (task.status == "Скачивается" || task.status == "Анализирую источник" || task.status == "В очереди") {
+                                TextButton(onClick = { onPause(task) }) { Text("Пауза", color = AppAccent) }
+                            }
+                            if (task.status == "Пауза" || task.status == "Ошибка") {
+                                TextButton(onClick = { onResume(task) }) { Text("Продолжить", color = AppAccent) }
+                            }
+                            if (task.status != "Готово" && task.status != "Отменено") {
+                                TextButton(onClick = { onCancel(task) }) { Text("Отменить", color = AppMuted) }
+                            }
                         }
                     }
                 }
@@ -533,7 +514,6 @@ private fun DownloadsScreen(
         }
     }
 }
-
 @Composable
 private fun LibraryScreen(refreshKey: Int, onOpen: (File) -> Unit) {
     val context = LocalContext.current

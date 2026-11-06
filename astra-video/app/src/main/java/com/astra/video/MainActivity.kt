@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -234,7 +235,7 @@ private fun AstraVideoApp() {
                             onMediaFound = { candidate ->
                                 if (candidates.none { it.url == candidate.url }) candidates.add(candidate)
                             },
-                            onDownloadPage = { enqueueDownload(currentPage, pageTitle, referer = currentPage) },
+                            onDownloadPage = { url, agent, cookies, referer -> enqueueDownload(url, pageTitle, agent, cookies, referer) },
                             onDownloadCandidate = { candidate ->
                                 enqueueDownload(
                                     candidate.url, candidate.kind, "Mozilla/5.0 AstraVideo",
@@ -242,7 +243,8 @@ private fun AstraVideoApp() {
                                 )
                             },
                             onDirectDownload = { url, agent, cookies, referer, disposition, mime ->
-                                enqueueDownload(url, "Медиафайл", agent, cookies, referer)
+                                val suggestedName = URLUtil.guessFileName(url, disposition, mime)
+                                enqueueDownload(url, suggestedName, agent, cookies, referer)
                             }
                         )
                         1 -> DownloadsScreen(
@@ -292,7 +294,7 @@ private fun BrowserScreen(
     onNavigate: (String) -> Unit,
     onPageChanged: (String, String) -> Unit,
     onMediaFound: (MediaCandidate) -> Unit,
-    onDownloadPage: () -> Unit,
+    onDownloadPage: (String, String, String?, String?) -> Unit,
     onDownloadCandidate: (MediaCandidate) -> Unit,
     onDirectDownload: (String, String, String?, String?, String?, String?) -> Unit
 ) {
@@ -338,7 +340,14 @@ private fun BrowserScreen(
                 Text(pageTitle.ifBlank { "Страница" }, color = Color.White, fontSize = 13.sp, maxLines = 1)
                 Text("Найдено медиа: " + candidates.size, color = AppMuted, fontSize = 11.sp)
             }
-            TextButton(onClick = onDownloadPage) {
+            TextButton(onClick = {
+                onDownloadPage(
+                    currentPage,
+                    webView?.settings?.userAgentString.orEmpty(),
+                    CookieManager.getInstance().getCookie(currentPage),
+                    currentPage
+                )
+            }) {
                 Icon(Icons.Default.Download, null, tint = AppAccent)
                 Spacer(Modifier.width(4.dp))
                 Text("Скачать страницу", color = AppAccent, fontSize = 12.sp)
@@ -389,10 +398,15 @@ private fun BrowserScreen(
                             onPageChanged(url, view.title.orEmpty())
                             val script = """
                                 (function() {
-                                  var re = /\.(mp4|m4v|webm|mkv|mov|m3u8|mpd|mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i;
-                                  return JSON.stringify(performance.getEntriesByType('resource')
-                                    .map(function(e) { return e.name; })
-                                    .filter(function(name) { return re.test(name); }));
+                                  var urls = new Set();
+                                  document.querySelectorAll('video, audio, source').forEach(function(el) {
+                                    if (el.currentSrc) urls.add(el.currentSrc);
+                                    if (el.src) urls.add(el.src);
+                                  });
+                                  performance.getEntriesByType('resource').slice(-300).forEach(function(entry) {
+                                    if (entry.name) urls.add(entry.name);
+                                  });
+                                  return JSON.stringify(Array.from(urls));
                                 })();
                             """.trimIndent()
                             evaluateJavascript(script) { result ->

@@ -31,7 +31,9 @@ object DownloadEngine {
     ): File = withContext(Dispatchers.IO) {
         slots.withPermit {
             val directory = outputDirectory(context)
-            val before = directory.listFiles()?.map { it.name }?.toSet().orEmpty()
+            // Изолируем результат каждой задачи: параллельные загрузки не должны
+            // случайно вернуть файл, созданный соседней задачей.
+            val taskPrefix = ".$processId-"
             val request = YoutubeDLRequest(sourceUrl)
             request.addOption("--no-playlist")
             request.addOption("--no-mtime")
@@ -49,17 +51,31 @@ object DownloadEngine {
             } else {
                 request.addOption("-f", "bestvideo*+bestaudio/best")
             }
-            request.addOption("-o", File(directory, "%(title).160B.%(ext)s").absolutePath)
+            request.addOption("-o", File(directory, taskPrefix + "%(title).160B.%(ext)s").absolutePath)
 
             YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
                 onProgress(progress.coerceIn(0f, 100f), line.takeLast(220))
             }
 
-            directory.listFiles()
-                ?.filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }
-                ?.filter { it.name !in before || it.lastModified() >= System.currentTimeMillis() - 180_000 }
+            val downloaded = directory.listFiles()
+                ?.filter {
+                    it.isFile && it.name.startsWith(taskPrefix) &&
+                        !it.name.endsWith(".part") && !it.name.endsWith(".ytdl")
+                }
                 ?.maxByOrNull { it.lastModified() }
                 ?: throw IllegalStateException("Загрузчик завершился, но готовый файл не найден")
+
+            val cleanName = downloaded.name.removePrefix(taskPrefix)
+            val dot = cleanName.lastIndexOf('.')
+            val stem = if (dot > 0) cleanName.substring(0, dot) else cleanName
+            val extension = if (dot > 0) cleanName.substring(dot) else ""
+            var destination = File(directory, cleanName)
+            var copy = 2
+            while (destination.exists()) {
+                destination = File(directory, "$stem ($copy)$extension")
+                copy++
+            }
+            if (downloaded.renameTo(destination)) destination else downloaded
         }
     }
 

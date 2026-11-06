@@ -12,8 +12,8 @@ android {
         applicationId = "com.astra.video"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.1"
+        versionCode = 9
+        versionName = "0.2.0"
     }
 
     buildFeatures { compose = true }
@@ -40,4 +40,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
 }

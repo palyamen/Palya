@@ -2,6 +2,7 @@ package com.astra.netspeed
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
@@ -26,6 +27,7 @@ class MainActivity : Activity() {
     private var tx0 = -1L
     private var testing = false
     private lateinit var status: TextView
+    private lateinit var totalTraffic: TextView
     private lateinit var down: TextView
     private lateinit var up: TextView
     private lateinit var result: TextView
@@ -51,6 +53,9 @@ class MainActivity : Activity() {
             } else {
                 down.text = "нет данных"
                 up.text = "нет данных"
+            }
+            if (::totalTraffic.isInitialized) {
+                totalTraffic.text = formatTraffic(TrafficTotal.record(this@MainActivity))
             }
             handler.postDelayed(this, 1000)
         }
@@ -100,6 +105,29 @@ class MainActivity : Activity() {
         card.addView(label("Обновление каждую секунду", 12f, muted, false).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
 
+        val trafficCard = panel()
+        trafficCard.addView(label("СТАТИСТИКА ТРАФИКА", 12f, muted, true), full())
+        trafficCard.addView(label("Скачано всего", 14f, muted, false).apply {
+            setPadding(0, dp(14), 0, dp(4))
+        }, full())
+        totalTraffic = label(formatTraffic(TrafficTotal.record(this)), 27f, white, true)
+        trafficCard.addView(totalTraffic, full())
+        val resetTraffic = button("СБРОСИТЬ", 0xFF203B59.toInt(), white)
+        resetTraffic.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Сбросить статистику?")
+                .setMessage("Общий счётчик скачанного трафика будет обнулён.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сбросить") { _, _ ->
+                    totalTraffic.text = formatTraffic(TrafficTotal.reset(this))
+                }
+                .show()
+        }
+        trafficCard.addView(resetTraffic, LinearLayout.LayoutParams(-1, dp(48)).apply {
+            topMargin = dp(14)
+        })
+        root.addView(trafficCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
+
         val testCard = panel()
         testCard.addView(label("ПРОВЕРКА СКОРОСТИ ИНТЕРНЕТА", 12f, muted, true), full())
         result = label("Измерь реальную скорость соединения", 14f, white, false).apply { gravity = Gravity.CENTER; setPadding(0, dp(14), 0, dp(14)) }
@@ -130,7 +158,8 @@ class MainActivity : Activity() {
         }
         root.addView(start, LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(18) })
         root.addView(stop, LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(10) })
-        root.addView(label("Текущая скорость — общий сетевой трафик телефона. Тест использует сервер Cloudflare; результат зависит от сети и расстояния до сервера.", 12f, muted, false).apply { gravity = Gravity.CENTER; setPadding(0, dp(22), 0, 0) }, full())
+        root.addView(label("Счётчик учитывает входящий трафик всего телефона, включая работу приложений в фоне. Данные сохраняются после закрытия приложения и перезагрузки телефона.", 12f, muted, false).apply { gravity = Gravity.CENTER; setPadding(0, dp(22), 0, 0) }, full())
+        root.addView(label("Тест скорости использует сервер Cloudflare; результат зависит от сети и расстояния до сервера.", 12f, muted, false).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, 0) }, full())
         setContentView(scroll)
         refresh()
     }
@@ -196,6 +225,19 @@ class MainActivity : Activity() {
         status.setTextColor(if (on) green else white)
         start.alpha = if (on) .55f else 1f; stop.alpha = if (on) 1f else .55f
     }
+    private fun formatTraffic(bytes: Long): String {
+        val value = bytes.coerceAtLeast(0L).toDouble()
+        val units = arrayOf("Б", "КБ", "МБ", "ГБ", "ТБ")
+        var amount = value
+        var unit = 0
+        while (amount >= 1024.0 && unit < units.lastIndex) {
+            amount /= 1024.0
+            unit++
+        }
+        return if (unit == 0) "${amount.toLong()} ${units[unit]}"
+        else String.format(Locale.US, "%.2f %s", amount, units[unit])
+    }
+
     private fun rate(bytes: Long): String {
         val kb = bytes / 1024.0
         return if (kb >= 1024) String.format(Locale.US, "%.1f MB/s", kb / 1024) else String.format(Locale.US, "%.0f KB/s", kb)

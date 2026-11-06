@@ -36,6 +36,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -66,7 +72,11 @@ private fun AstraCloudScreen() {
     val vault = remember { File(context.filesDir, "vault").apply { mkdirs() } }
     var files by remember { mutableStateOf<List<VaultFile>>(vault.listFiles()?.filter { it.isFile && it.extension == "acrypt" }?.map { VaultFile(it) } ?: emptyList()) }
     var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("Файлы шифруются на этом устройстве") }
+    var message by remember { mutableStateOf("Локальный сейф. Облачное подключение готовится.") }
+    var selectedForShare by remember { mutableStateOf<VaultFile?>(null) }
+    var transferPassword by remember { mutableStateOf("") }
+    var pendingImport by remember { mutableStateOf<Uri?>(null) }
+    var transferDialog by remember { mutableStateOf(false) }
 
     fun refresh() {
         files = vault.listFiles()?.filter { it.isFile && it.extension == "acrypt" }?.map { VaultFile(it) } ?: emptyList()
@@ -102,30 +112,72 @@ private fun AstraCloudScreen() {
     }
 
     fun shareFile(item: VaultFile) {
+        selectedForShare = item
+        pendingImport = null
+        transferPassword = ""
+        transferDialog = true
+    }
+
+    val portablePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            pendingImport = uri
+            selectedForShare = null
+            transferPassword = ""
+            transferDialog = true
+        }
+    }
+
+    fun performTransfer() {
+        val password = transferPassword
+        if (password.length < 12) { message = "Пароль должен содержать не менее 12 символов"; return }
+        val sharing = selectedForShare
+        val importing = pendingImport
+        transferDialog = false
         scope.launch {
             busy = true
+            message = if (sharing != null) "Создаю зашифрованный файл…" else "Проверяю и расшифровываю файл…"
             try {
-                val shared = withContext(Dispatchers.IO) {
-                    val bytes = item.file.readBytes()
-                    val iv = bytes.copyOfRange(0, 12)
-                    val encrypted = bytes.copyOfRange(12, bytes.size)
-                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                    cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
-                    val plain = cipher.doFinal(encrypted)
-                    val dir = File(context.cacheDir, "shared").apply { mkdirs() }
-                    File(dir, item.displayName).apply { writeBytes(plain) }
+                if (sharing != null) {
+                    val exported = withContext(Dispatchers.IO) {
+                        val raw = sharing.file.readBytes()
+                        require(raw.size > 12) { "Повреждён файл сейфа" }
+                        val iv = raw.copyOfRange(0, 12)
+                        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+                        val plain = cipher.doFinal(raw.copyOfRange(12, raw.size))
+                        val out = File(context.cacheDir, "shared").apply { mkdirs() }
+                        val file = File(out, safeName(sharing.displayName) + ".astra")
+                        encryptPortable(plain, password, file)
+                        file
+                    }
+                    val uri = FileProvider.getUriForFile(context, "com.astra.cloud.fileprovider", exported)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/octet-stream"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, "Зашифрованный файл Astra Cloud")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Отправить зашифрованный файл"))
+                    message = "Отправляется файл .astra. Передай получателю пароль отдельно."
+                } else if (importing != null) {
+                    withContext(Dispatchers.IO) {
+                        val plain = context.contentResolver.openInputStream(importing)?.use { decryptPortable(it.readBytes(), password) }
+                            ?: error("Не удалось открыть файл")
+                        val name = queryDisplayName(context, importing).removeSuffix(".astra")
+                        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+                        val target = File(vault, safeName(name) + ".acrypt")
+                        FileOutputStream(target).use { output -> output.write(cipher.iv); output.write(cipher.doFinal(plain)) }
+                    }
+                    refresh()
+                    message = "Файл расшифрован и сохранён в локальный сейф"
                 }
-                val uri = FileProvider.getUriForFile(context, "com.astra.cloud.fileprovider", shared)
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = context.contentResolver.getType(uri) ?: "*/*"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "Поделиться файлом"))
             } catch (e: Exception) {
-                message = "Не удалось подготовить файл к отправке"
+                message = if (sharing != null) "Не удалось создать защищённую копию: ${e.localizedMessage ?: "ошибка"}" else "Неверный пароль или повреждённый файл"
             }
             busy = false
+            selectedForShare = null
+            pendingImport = null
         }
     }
 
@@ -179,6 +231,10 @@ private fun AstraCloudScreen() {
                     Spacer(Modifier.width(8.dp))
                     Text("Добавить файл в сейф", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = { portablePicker.launch(arrayOf("application/octet-stream", "*/*")) }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(16.dp)) {
+                    Icon(Icons.Default.LockOpen, null); Spacer(Modifier.width(8.dp)); Text("Получить зашифрованный файл")
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     FeatureChip(Icons.Default.EnhancedEncryption, "AES-256", Modifier.weight(1f))
@@ -228,6 +284,21 @@ private fun AstraCloudScreen() {
                 }
             }
         }
+        if (transferDialog) {
+            AlertDialog(
+                onDismissRequest = { transferDialog = false; selectedForShare = null; pendingImport = null },
+                title = { Text(if (selectedForShare != null) "Защищённая отправка" else "Открыть файл Astra") },
+                text = {
+                    Column {
+                        Text(if (selectedForShare != null) "Файл будет заново зашифрован отдельным паролем. Отправляй пароль получателю другим способом." else "Введи пароль, который отправитель передал отдельно.")
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(value = transferPassword, onValueChange = { transferPassword = it }, label = { Text("Пароль (минимум 12 символов)") }, singleLine = true)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { performTransfer() }) { Text(if (selectedForShare != null) "Зашифровать и отправить" else "Расшифровать") } },
+                dismissButton = { TextButton(onClick = { transferDialog = false; selectedForShare = null; pendingImport = null }) { Text("Отмена") } }
+            )
+        }
     }
 }
 
@@ -263,3 +334,34 @@ private fun queryDisplayName(context: android.content.Context, uri: Uri): String
 }
 private fun safeName(value: String) = value.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(100).ifBlank { "file" }
 private fun formatSize(size: Long): String = if (size < 1024) "$size Б" else if (size < 1024 * 1024) "${size / 1024} КБ" else "${"%.1f".format(size / 1048576f)} МБ"
+
+
+private fun encryptPortable(plain: ByteArray, password: String, target: File) {
+    val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+    val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+    val spec = PBEKeySpec(password.toCharArray(), salt, 600_000, 256)
+    val keyBytes = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    spec.clearPassword()
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
+    target.outputStream().use { out ->
+        out.write("ASTRAC01".toByteArray(Charsets.US_ASCII))
+        out.write(salt); out.write(iv); out.write(cipher.doFinal(plain))
+    }
+    keyBytes.fill(0)
+}
+
+private fun decryptPortable(data: ByteArray, password: String): ByteArray {
+    require(data.size >= 8 + 16 + 12 + 16) { "Файл слишком короткий" }
+    require(String(data.copyOfRange(0, 8), Charsets.US_ASCII) == "ASTRAC01") { "Неподдерживаемый формат Astra" }
+    val salt = data.copyOfRange(8, 24)
+    val iv = data.copyOfRange(24, 36)
+    val spec = PBEKeySpec(password.toCharArray(), salt, 600_000, 256)
+    val keyBytes = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    spec.clearPassword()
+    return try {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
+        cipher.doFinal(data.copyOfRange(36, data.size))
+    } finally { keyBytes.fill(0) }
+}

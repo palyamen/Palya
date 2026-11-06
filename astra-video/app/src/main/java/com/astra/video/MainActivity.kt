@@ -245,7 +245,13 @@ private fun AstraVideoApp() {
                                 enqueueDownload(url, "Медиафайл", agent, cookies, referer)
                             }
                         )
-                        1 -> DownloadsScreen(tasks, refreshKey, onRefresh = { refreshKey++ })
+                        1 -> DownloadsScreen(
+                            tasks, refreshKey,
+                            onRefresh = { refreshKey++ },
+                            onPause = { pauseTask(it) },
+                            onResume = { resumeTask(it) },
+                            onCancel = { cancelTask(it) }
+                        )
                         2 -> LibraryScreen(refreshKey) { selectedFile = it }
                         else -> SettingsScreen()
                     }
@@ -403,7 +409,7 @@ private fun BrowserScreen(
                     setDownloadListener { downloadUrl, userAgent, contentDisposition, mimeType, _ ->
                         val cookies = CookieManager.getInstance().getCookie(downloadUrl)
                         onDirectDownload(
-                            downloadUrl, userAgent.orEmpty(), cookies, view.url.orEmpty(),
+                            downloadUrl, userAgent.orEmpty(), cookies, webView?.url.orEmpty(),
                             contentDisposition, mimeType
                         )
                     }

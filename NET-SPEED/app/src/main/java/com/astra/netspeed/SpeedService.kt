@@ -94,6 +94,7 @@ class SpeedService : Service() {
     }
 
     private fun updateNotification() {
+        TrafficTotal.record(this)
         val rx = TrafficStats.getTotalRxBytes()
         val tx = TrafficStats.getTotalTxBytes()
         if (rx < 0 || tx < 0 || previousRx < 0 || previousTx < 0) return

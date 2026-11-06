@@ -40,9 +40,9 @@ object DownloadEngine {
             request.addOption("--retries", "5")
             request.addOption("--fragment-retries", "5")
             request.addOption("--concurrent-fragments", "4")
-            if (userAgent.isNullOrBlank().not()) request.addOption("--add-header", "User-Agent: " + userAgent)
-            if (cookies.isNullOrBlank().not()) request.addOption("--add-header", "Cookie: " + cookies)
-            if (referer.isNullOrBlank().not()) request.addOption("--add-header", "Referer: " + referer)
+            if (userAgent.isNullOrBlank().not()) request.addOption("--add-headers", "User-Agent: " + userAgent)
+            if (cookies.isNullOrBlank().not()) request.addOption("--add-headers", "Cookie: " + cookies)
+            if (referer.isNullOrBlank().not()) request.addOption("--add-headers", "Referer: " + referer)
             if (audioOnly) {
                 request.addOption("-x")
                 request.addOption("--audio-format", "mp3")

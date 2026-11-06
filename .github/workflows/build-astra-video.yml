@@ -2,7 +2,7 @@ name: Build Astra Video APK
 
 on:
   push:
-    branches: [astra-video]
+    branches: [astra-video, astra-video-rebuild]
     paths:
       - "astra-video/**"
       - ".github/workflows/build-astra-video.yml"

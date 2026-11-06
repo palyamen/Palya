@@ -18,6 +18,10 @@ android {
 
     buildFeatures { compose = true }
 
+    packaging { jniLibs { useLegacyPackaging = true } }
+
+    defaultConfig { ndk { abiFilters += listOf("arm64-v8a") } }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -34,4 +38,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.core:core-ktx:1.15.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("io.github.junkfood02.youtubedl-android:library:0.16.0")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.16.0")
 }

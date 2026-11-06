@@ -294,13 +294,17 @@ private fun DownloadsScreen() {
         Spacer(Modifier.height(14.dp))
         Button(
             onClick = {
-                val enteredUrl = url.trim()
+                val rawInput = url.trim()
+                val enteredUrl = if (rawInput.startsWith("https://", true) || rawInput.startsWith("http://", true)) rawInput else "https://$rawInput"
                 val parsed = Uri.parse(enteredUrl)
                 if ((parsed.scheme == "https" || parsed.scheme == "http") && !parsed.host.isNullOrBlank()) {
                     scope.launch {
                         checking = true
-                        val host = parsed.host.orEmpty().lowercase(Locale.ROOT)
-                        val isYouTube = host == "youtu.be" || host == "youtube.com" || host.endsWith(".youtube.com")
+                        val host = parsed.host.orEmpty().lowercase(Locale.ROOT).removePrefix("www.").removePrefix("m.")
+                        val normalizedUrl = enteredUrl.lowercase(Locale.ROOT)
+                        val isYouTube = host == "youtu.be" || host.endsWith(".youtu.be") ||
+                            host == "youtube.com" || host.endsWith(".youtube.com") ||
+                            normalizedUrl.contains("youtube.com/") || normalizedUrl.contains("youtu.be/")
                         if (isYouTube) {
                             message = "Распознала YouTube. Получаю варианты видео…"
                             extractorProgress = 0f

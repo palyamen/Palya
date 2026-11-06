@@ -3,6 +3,7 @@ package com.astra.video
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.graphics.Color as AndroidColor
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +40,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
 import androidx.compose.ui.viewinterop.AndroidView
 
 private val Back = Color(0xFF0B0D12)
@@ -200,21 +209,45 @@ private fun AstraVideoApp() {
     }
 }
 
+private data class DownloadItem(
+    val id: Long, val title: String, val status: String,
+    val downloaded: Long, val total: Long, val mime: String
+)
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 0) return "размер неизвестен"
+    if (bytes < 1024) return "$bytes Б"
+    if (bytes < 1024 * 1024) return String.format(Locale.getDefault(), "%.1f КБ", bytes / 1024.0)
+    if (bytes < 1024L * 1024L * 1024L) return String.format(Locale.getDefault(), "%.1f МБ", bytes / (1024.0 * 1024.0))
+    return String.format(Locale.getDefault(), "%.2f ГБ", bytes / (1024.0 * 1024.0 * 1024.0))
+}
+
 @Composable
 private fun DownloadsScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var url by remember { mutableStateOf("") }
     var fileName by remember { mutableStateOf("") }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var checking by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        while (true) { delay(1200); refreshKey++ }
+    }
+
     val downloads = remember(refreshKey) {
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val result = mutableListOf<Pair<String, String>>()
+        val result = mutableListOf<DownloadItem>()
         val cursor = manager.query(DownloadManager.Query())
         cursor?.use {
+            val idCol = it.getColumnIndex(DownloadManager.COLUMN_ID)
             val titleCol = it.getColumnIndex(DownloadManager.COLUMN_TITLE)
             val statusCol = it.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            val totalCol = it.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            val doneCol = it.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val mimeCol = it.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
             while (it.moveToNext()) {
-                val title = if (titleCol >= 0) it.getString(titleCol) ?: "Файл" else "Файл"
                 val status = when (it.getInt(statusCol)) {
                     DownloadManager.STATUS_SUCCESSFUL -> "Готово"
                     DownloadManager.STATUS_FAILED -> "Ошибка загрузки"
@@ -223,18 +256,23 @@ private fun DownloadsScreen() {
                     DownloadManager.STATUS_PAUSED -> "Приостановлено"
                     else -> "Неизвестно"
                 }
-                result.add(title to status)
+                result.add(DownloadItem(
+                    it.getLong(idCol), it.getString(titleCol) ?: "Файл", status,
+                    if (doneCol >= 0) it.getLong(doneCol) else 0L,
+                    if (totalCol >= 0) it.getLong(totalCol) else -1L,
+                    if (mimeCol >= 0) it.getString(mimeCol).orEmpty() else ""
+                ))
             }
         }
-        result
+        result.reversed()
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("Загрузки", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Text("Сохраняй MP4, MP3 и другие файлы по прямой ссылке, если у тебя есть право на их скачивание.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+        Text("Скачивай прямые ссылки на видео- и аудиофайлы. Ссылки на страницы YouTube и других сайтов не являются видеофайлами.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
         Spacer(Modifier.height(18.dp))
-        Text("Прямая ссылка на файл", color = Color.White, fontWeight = FontWeight.SemiBold)
+        Text("Прямая ссылка на видео или аудио", color = Color.White, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         InputPanel(value = url, onValueChange = { url = it }, hint = "https://сайт.ru/video.mp4")
         Spacer(Modifier.height(12.dp))
@@ -244,38 +282,82 @@ private fun DownloadsScreen() {
         Spacer(Modifier.height(14.dp))
         Button(
             onClick = {
-                val parsed = Uri.parse(url.trim())
+                val enteredUrl = url.trim()
+                val parsed = Uri.parse(enteredUrl)
                 if ((parsed.scheme == "https" || parsed.scheme == "http") && !parsed.host.isNullOrBlank()) {
-                    try {
-                        val guessed = parsed.lastPathSegment?.takeIf { it.contains('.') } ?: ("astra_video_" + System.currentTimeMillis())
-                        val safeName = fileName.trim().ifBlank { guessed }
-                            .map { if (it.isLetterOrDigit() || it in " ._-") it else '_' }.joinToString("")
-                        val request = DownloadManager.Request(parsed)
-                            .setTitle(safeName)
-                            .setDescription("Загрузка через Astra Video")
-                            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            .setAllowedOverMetered(true)
-                            .setAllowedOverRoaming(false)
-                            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                        manager.enqueue(request)
-                        Toast.makeText(context, "Загрузка добавлена", Toast.LENGTH_SHORT).show()
-                        url = ""
-                        fileName = ""
-                        refreshKey++
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Не удалось начать загрузку", Toast.LENGTH_LONG).show()
+                    scope.launch {
+                        checking = true
+                        message = "Проверяю ссылку и тип файла…"
+                        val check = withContext(Dispatchers.IO) {
+                            try {
+                                val connection = (URL(enteredUrl).openConnection() as HttpURLConnection).apply {
+                                    requestMethod = "HEAD"
+                                    connectTimeout = 12000
+                                    readTimeout = 12000
+                                    instanceFollowRedirects = true
+                                    setRequestProperty("User-Agent", "Mozilla/5.0 AstraVideo")
+                                }
+                                val code = connection.responseCode
+                                val mime = connection.contentType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
+                                val length = connection.contentLengthLong
+                                connection.disconnect()
+                                Triple(code, mime, length)
+                            } catch (_: Exception) { Triple(-1, "", -1L) }
+                        }
+                        val (code, mime, length) = check
+                        val pathPart = Uri.parse(enteredUrl).lastPathSegment.orEmpty().lowercase(Locale.ROOT)
+                        val mediaExtension = listOf(".mp4", ".m4v", ".webm", ".mkv", ".mov", ".mp3", ".m4a", ".aac", ".ogg", ".wav").any { pathPart.endsWith(it) }
+                        val isMedia = mime.startsWith("video/") || mime.startsWith("audio/") ||
+                            mime == "application/octet-stream" && mediaExtension
+                        if (code in 200..299 && (mime == "text/html" || mime == "application/json" || mime.startsWith("text/"))) {
+                            message = "Это веб-страница, а не видеофайл. Нужна прямая ссылка на .mp4 или другой медиафайл."
+                        } else if (code in 200..299 && !isMedia && !mediaExtension) {
+                            message = "Сервер не подтвердил, что по ссылке находится видео или аудио. Загрузка отменена."
+                        } else if (code in 200..299 || code == -1 && mediaExtension) {
+                            try {
+                                val guessed = parsed.lastPathSegment?.takeIf { it.contains('.') } ?: ("astra_video_" + System.currentTimeMillis() + ".mp4")
+                                val safeName = fileName.trim().ifBlank { guessed }.map { if (it.isLetterOrDigit() || it in " ._-") it else '_' }.joinToString("")
+                                val request = DownloadManager.Request(parsed)
+                                    .setTitle(safeName)
+                                    .setDescription("Astra Video • " + if (length > 0) formatBytes(length) else "размер уточняется")
+                                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                    .setAllowedOverMetered(true)
+                                    .setAllowedOverRoaming(false)
+                                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
+                                if (mime.isNotBlank()) request.setMimeType(mime)
+                                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                                manager.enqueue(request)
+                                message = "Загрузка началась • " + if (length > 0) formatBytes(length) else "размер неизвестен"
+                                url = ""
+                                fileName = ""
+                                refreshKey++
+                            } catch (_: Exception) {
+                                message = "Не удалось начать загрузку. Проверь ссылку и свободное место."
+                            }
+                        } else {
+                            message = "Сервер вернул ошибку HTTP $code. Проверь ссылку."
+                        }
+                        checking = false
                     }
-                } else {
-                    Toast.makeText(context, "Введи корректную http/https-ссылку", Toast.LENGTH_SHORT).show()
-                }
+                } else { message = "Введи корректную http/https-ссылку." }
             },
+            enabled = !checking,
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = Accent)
         ) {
-            Icon(Icons.Default.Download, null)
-            Spacer(Modifier.width(8.dp))
-            Text("Скачать файл")
+            if (checking) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Проверяю ссылку…")
+            } else {
+                Icon(Icons.Default.Download, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Проверить и скачать")
+            }
+        }
+        if (message.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(message, color = if (message.contains("отменена") || message.contains("ошибку") || message.contains("страница")) Accent else Muted, fontSize = 12.sp, lineHeight = 17.sp)
         }
         Spacer(Modifier.height(22.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -286,22 +368,56 @@ private fun DownloadsScreen() {
             Text("Пока ничего не загружено", color = Muted, fontSize = 13.sp)
         } else {
             downloads.forEach { item ->
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
-                        .background(Panel, RoundedCornerShape(14.dp)).padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.InsertDriveFile, null, tint = Accent)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(item.first, color = Color.White, fontSize = 14.sp, maxLines = 1)
-                        Text(item.second, color = Muted, fontSize = 12.sp)
+                Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).background(Panel, RoundedCornerShape(14.dp)).padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.InsertDriveFile, null, tint = Accent)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
+                            Text(item.status, color = if (item.status == "Ошибка загрузки") Accent else Muted, fontSize = 12.sp)
+                        }
+                        Text(if (item.total > 0) formatBytes(item.downloaded) + " / " + formatBytes(item.total) else formatBytes(item.downloaded), color = Muted, fontSize = 11.sp)
+                    }
+                    if (item.status == "Загружается" && item.total > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { (item.downloaded.toFloat() / item.total).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(), color = Accent
+                        )
+                    }
+                    if (item.status == "Готово") {
+                        Spacer(Modifier.height(6.dp))
+                        Text("Тип: " + item.mime.ifBlank { "не определён" } + " • Размер: " + formatBytes(item.total), color = Muted, fontSize = 11.sp)
+                        TextButton(onClick = {
+                            try {
+                                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                                val fileUri = manager.getUriForDownloadedFile(item.id)
+                                if (fileUri == null) {
+                                    Toast.makeText(context, "Файл не найден", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(fileUri, item.mime.ifBlank { "*/*" })
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Открыть файл"))
+                                }
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Не найдено приложение для открытия файла", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.PlayArrow, null, tint = Accent)
+                            Spacer(Modifier.width(5.dp))
+                            Text("Открыть файл", color = Accent)
+                        }
+                    }
+                    if (item.status == "Ошибка загрузки") {
+                        Text("Загрузка не завершилась. Попробуй другую прямую ссылку.", color = Muted, fontSize = 11.sp)
                     }
                 }
             }
         }
         Spacer(Modifier.height(10.dp))
-        Text("Это загрузчик файлов по прямым ссылкам. Он не извлекает видео или аудио из YouTube. Для роликов YouTube используй официальное офлайн-сохранение или экспорт собственных видео.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+        Text("Важно: приложение не извлекает видео из страниц YouTube. Нужен прямой адрес самого файла, например .mp4 или .webm. Перед скачиванием Astra Video проверяет ответ сервера, показывает размер и тип файла.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
     }
 }
 

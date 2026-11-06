@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#080d0a">
+<title>TANKS by Astra</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080d0a;touch-action:none;overscroll-behavior:none}body{font-family:system-ui,Arial,sans-serif}#game{position:fixed;inset:0;width:100vw;height:100dvh;display:block;background:#101810;touch-action:none}#hud{position:fixed;top:env(safe-area-inset-top,8px);left:0;right:0;display:flex;justify-content:center;gap:18px;align-items:center;color:#d9e7d7;font-weight:800;font-size:clamp(12px,2.4vw,18px);text-shadow:0 2px 3px #000;pointer-events:none;z-index:2}.pill{background:#0b130dcc;border:1px solid #52654b;border-radius:999px;padding:5px 12px}#controls{position:fixed;inset:0;pointer-events:none;z-index:3}.pad{position:absolute;left:max(3vw,env(safe-area-inset-left,10px));bottom:max(4vh,env(safe-area-inset-bottom,10px));width:clamp(118px,25vw,190px);height:clamp(118px,25vw,190px);pointer-events:auto;touch-action:none;opacity:.84}.pad button,.fire{position:absolute;border:2px solid #d8e6ca99;background:#283b2bd9;color:#f3f7e9;box-shadow:0 4px 12px #0009,inset 0 1px 5px #ffffff20;touch-action:none;user-select:none;-webkit-user-select:none}.pad button{width:34%;height:34%;border-radius:13px;font-size:clamp(20px,5vw,32px);font-weight:900}.pad button:active,.fire:active{background:#77974d}.up{left:33%;top:0}.down{left:33%;bottom:0}.left{left:0;top:33%}.right{right:0;top:33%}.center{left:33%;top:33%;border-radius:50%!important;background:#17251bcc!important;pointer-events:none}.fire{right:max(5vw,env(safe-area-inset-right,12px));bottom:max(7vh,env(safe-area-inset-bottom,14px));width:clamp(82px,16vw,132px);height:clamp(82px,16vw,132px);border-radius:50%;font-size:clamp(15px,3vw,23px);font-weight:900;pointer-events:auto}.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#050907d9;z-index:5;padding:20px}.panel{max-width:420px;width:min(92vw,420px);padding:24px;border:1px solid #78905f;border-radius:22px;background:linear-gradient(145deg,#1b2a1e,#0c140f);text-align:center;color:#edf5e7;box-shadow:0 15px 60px #000b}.panel h1{margin:0 0 8px;font-size:clamp(26px,6vw,40px);letter-spacing:2px}.panel p{color:#c3d0bc;line-height:1.5}.panel button{border:0;border-radius:14px;padding:14px 26px;background:#b5d47a;color:#17210f;font-size:18px;font-weight:900}.small{font-size:12px;color:#9eaf98!important}@media(orientation:portrait){#rotate{display:flex}}#rotate{display:none}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"><span class="pill" id="level">УРОВЕНЬ 1</span><span class="pill" id="score">ОЧКИ 0000</span><span class="pill" id="lives">♥ ♥ ♥</span></div>
+<div id="controls">
+ <div class="pad" aria-label="Джойстик">
+  <button class="up" data-dir="up">▲</button><button class="down" data-dir="down">▼</button><button class="left" data-dir="left">◀</button><button class="right" data-dir="right">▶</button><button class="center" tabindex="-1">✦</button>
+ </div>
+ <button class="fire" id="fire">ОГОНЬ</button>
+</div>
+<div class="overlay" id="menu"><div class="panel"><h1>TANKS</h1><p>Ретро-танковая битва<br>Защити штаб и уничтожь вражеские танки!</p><button id="start">НАЧАТЬ ИГРУ</button><p class="small">Поверни телефон горизонтально.<br>Движение — джойстик · Выстрел — кнопка справа</p></div></div>
+<div class="overlay" id="rotate"><div class="panel"><h1>↻ ПОВЕРНИ ТЕЛЕФОН</h1><p>Игра работает в горизонтальном режиме.</p></div></div>
+<script>
+(()=>{'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),menu=document.getElementById('menu');
+const TILE=24,COLS=26,ROWS=18,MAP_W=COLS*TILE,MAP_H=ROWS*TILE;
+let W=0,H=0,scale=1,ox=0,oy=0,last=0,score=0,lives=3,level=1,running=false,gameOver=false,won=false;
+let map=[],player=null,enemies=[],bullets=[],particles=[],spawn=0,enemyCount=0,keys={up:false,down:false,left:false,right:false},fireHeld=false,fireCooldown=0,enemyFire=0;
+const colors={grass:'#294b2c',brick:'#a85e32',steel:'#85949a',water:'#315c82',ice:'#b5d2ce'};
+function resize(){W=innerWidth;H=innerHeight;let dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);scale=Math.min(W/MAP_W,H/MAP_H);ox=(W-MAP_W*scale)/2;oy=(H-MAP_H*scale)/2}
+addEventListener('resize',resize);resize();
+function makeMap(){map=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+ const blocks=[[4,3,1,2],[8,2,2,1],[14,2,2,1],[20,3,1,2],[3,7,2,1],[7,6,1,3],[11,5,4,1],[18,6,1,3],[22,7,2,1],[3,12,2,1],[8,11,1,3],[12,12,2,1],[17,11,1,3],[21,12,2,1],[5,15,2,1],[19,15,2,1]];
+ blocks.forEach(([x,y,w,h])=>{for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)map[yy][xx]=1});
+ for(let x=11;x<15;x++)map[15][x]=1;
+ map[15][12]=map[15][13]=0; // open base approach
+ for(let y=14;y<18;y++)for(let x=11;x<15;x++)if((y===14||x===11||x===14)&&!(y===15&&(x===12||x===13)))map[y][x]=1;
+}
+function tank(x,y,dir,enemy=false){return{x,y,dir,w:18,h:18,speed:enemy?55:92,enemy,alive:true,flash:0,shot:0,hp:1}}
+function reset(){score=0;lives=3;level=1;gameOver=false;won=false;makeMap();player=tank(MAP_W/2-TILE/2,MAP_H-2*TILE,'up');enemies=[];bullets=[];particles=[];spawn=0;enemyCount=0;fireCooldown=0;enemyFire=0;updateHud()}
+function updateHud(){document.getElementById('score').textContent='ОЧКИ '+String(score).padStart(4,'0');document.getElementById('level').textContent='УРОВЕНЬ '+level;document.getElementById('lives').textContent='♥ '.repeat(Math.max(0,lives))}
+function rectHit(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+function solidAt(x,y,w,h){if(x<0||y<0||x+w>MAP_W||y+h>MAP_H)return true;let x1=Math.floor(x/TILE),x2=Math.floor((x+w-1)/TILE),y1=Math.floor(y/TILE),y2=Math.floor((y+h-1)/TILE);for(let yy=y1;yy<=y2;yy++)for(let xx=x1;xx<=x2;xx++)if(map[yy][xx]===1||map[yy][xx]===2)return true;return false}
+function move(t,dx,dy){let nx=t.x+dx,ny=t.y+dy;if(!solidAt(nx,ny,t.w,t.h)&&!collidesTank(nx,ny,t)){t.x=nx;t.y=ny;return true}return false}
+function collidesTank(x,y,t){let a={x,y,w:t.w,h:t.h};if(t!==player&&player?.alive&&rectHit(a,player))return true;return enemies.some(e=>e!==t&&e.alive&&rectHit(a,e))}
+function shoot(t){if(!t.alive||t.shot>0)return;t.shot=t.enemy?.72:.24;let dx=t.dir==='left'?-1:t.dir==='right'?1:0,dy=t.dir==='up'?-1:t.dir==='down'?1:0;bullets.push({x:t.x+t.w/2-3+dx*12,y:t.y+t.h/2-3+dy*12,w:6,h:6,dx,dy,speed:t.enemy?210:300,enemy:t.enemy,life:2.2})}
+function burst(x,y,color){for(let i=0;i<9;i++)particles.push({x,y,dx:(Math.random()-.5)*100,dy:(Math.random()-.5)*100,life:.35,color})}
+function spawnEnemy(){if(enemies.filter(e=>e.alive).length>=4||enemyCount>=10)return;let spots=[{x:2*TILE,y:TILE},{x:12*TILE,y:TILE},{x:23*TILE,y:TILE}];let p=spots[Math.floor(Math.random()*spots.length)];let e=tank(p.x+3,p.y+3,'down',true);if(!collidesTank(e.x,e.y,e)&&!solidAt(e.x,e.y,e.w,e.h)){enemies.push(e);enemyCount++}}
+function update(dt){if(!running||gameOver||won)return;dt=Math.min(dt,.04);fireCooldown=Math.max(0,fireCooldown-dt);if(player?.alive){let dir=keys.up?'up':keys.down?'down':keys.left?'left':keys.right?'right':null;if(dir){player.dir=dir;let v=player.speed*dt;move(player,dir==='left'?-v:dir==='right'?v:0,dir==='up'?-v:dir==='down'?v:0)}if(fireHeld&&fireCooldown<=0){shoot(player);fireCooldown=.26}}
+ spawn-=dt;if(spawn<=0&&enemyCount<10){spawnEnemy();spawn=1.6}
+ enemies.forEach(e=>{if(!e.alive)return;e.shot=Math.max(0,e.shot-dt);e.flash=Math.max(0,e.flash-dt);e.turn=(e.turn||0)-dt;if(e.turn<=0){let dirs=['down','left','right','up'];e.dir=dirs[Math.floor(Math.random()*dirs.length)];e.turn=.7+Math.random()*1.4}let d=e.speed*dt,dx=e.dir==='left'?-d:e.dir==='right'?d:0,dy=e.dir==='up'?-d:e.dir==='down'?d:0;if(!move(e,dx,dy)){e.turn=0}if(Math.random()<dt*.55)shoot(e)});
+ bullets.forEach(b=>{b.x+=b.dx*b.speed*dt;b.y+=b.dy*b.speed*dt;b.life-=dt;if(b.x<0||b.y<0||b.x>MAP_W||b.y>MAP_H)b.life=0;let tx=Math.floor((b.x+b.w/2)/TILE),ty=Math.floor((b.y+b.h/2)/TILE);if(tx>=0&&ty>=0&&tx<COLS&&ty<ROWS&&(map[ty][tx]===1||map[ty][tx]===2)){if(map[ty][tx]===1){map[ty][tx]=0;burst(tx*TILE+12,ty*TILE+12,'#d58a4c')}b.life=0}if(b.enemy&&player?.alive&&rectHit(b,player)){b.life=0;player.alive=false;burst(player.x+9,player.y+9,'#e4bc62');lives--;updateHud();setTimeout(()=>{if(lives>0&&!gameOver){player=tank(MAP_W/2-TILE/2,MAP_H-2*TILE,'up')}else endGame(false)},650)}else if(!b.enemy){let hit=enemies.find(e=>e.alive&&rectHit(b,e));if(hit){hit.alive=false;b.life=0;score+=100;updateHud();burst(hit.x+9,hit.y+9,'#e8b75c')}}});
+ bullets=bullets.filter(b=>b.life>0);particles.forEach(p=>{p.x+=p.dx*dt;p.y+=p.dy*dt;p.life-=dt});particles=particles.filter(p=>p.life>0);
+ if(enemyCount>=10&&enemies.every(e=>!e.alive)&&bullets.length===0){if(level<3){level++;enemyCount=0;enemies=[];makeMap();spawn=1;updateHud()}else endGame(true)}
+}
+function endGame(win){running=false;gameOver=!win;won=win;menu.style.display='flex';menu.querySelector('h1').textContent=win?'ПОБЕДА!':'ИГРА ОКОНЧЕНА';menu.querySelector('p').innerHTML=win?'Ты защитил штаб!<br>Счёт: '+score:'Штаб не удалось защитить.<br>Счёт: '+score;document.getElementById('start').textContent='ИГРАТЬ СНОВА'}
+function drawTank(t){ctx.save();ctx.translate(t.x+t.w/2,t.y+t.h/2);let angle={up:0,right:Math.PI/2,down:Math.PI,left:-Math.PI/2}[t.dir];ctx.rotate(angle);ctx.fillStyle=t.enemy?'#b65a3f':'#c5d77a';ctx.fillRect(-10,-10,20,20);ctx.fillStyle=t.enemy?'#743b30':'#647c3d';ctx.fillRect(-12,-10,5,20);ctx.fillRect(7,-10,5,20);ctx.fillStyle=t.enemy?'#e6a08b':'#e7efb5';ctx.fillRect(-5,-6,10,12);ctx.fillStyle='#d6d9c0';ctx.fillRect(-2,-15,4,13);ctx.restore()}
+function render(){ctx.clearRect(0,0,W,H);ctx.fillStyle='#080d0a';ctx.fillRect(0,0,W,H);ctx.save();ctx.translate(ox,oy);ctx.scale(scale,scale);ctx.fillStyle='#1c2a1d';ctx.fillRect(0,0,MAP_W,MAP_H);
+ for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){let v=map[y][x],px=x*TILE,py=y*TILE;if(v===1){ctx.fillStyle='#a65d34';ctx.fillRect(px,py,TILE,TILE);ctx.fillStyle='#d08a54';ctx.fillRect(px+1,py+2,10,3);ctx.fillRect(px+13,py+13,10,3);ctx.fillStyle='#61351f';ctx.fillRect(px,py+11,24,2)}else{ctx.fillStyle=(x+y)%2?'#203923':'#243f27';ctx.fillRect(px,py,TILE,TILE);if((x*7+y*13)%19===0){ctx.fillStyle='#355d36';ctx.fillRect(px+5,py+6,3,3)}}}
+ // Headquarters
+ ctx.fillStyle='#d5c68a';ctx.fillRect(12*TILE,16*TILE,2*TILE,TILE);ctx.fillStyle='#bd4936';ctx.beginPath();ctx.moveTo(13*TILE,16*TILE+3);ctx.lineTo(13*TILE+12,16*TILE+14);ctx.lineTo(13*TILE+24,16*TILE+3);ctx.fill();ctx.fillStyle='#f4e9c6';ctx.fillRect(13*TILE+9,16*TILE+13,6,7);
+ if(player?.alive)drawTank(player);enemies.forEach(e=>{if(e.alive)drawTank(e)});
+ bullets.forEach(b=>{ctx.fillStyle=b.enemy?'#ff9d65':'#f5f1bd';ctx.fillRect(b.x,b.y,b.w,b.h)});
+ particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/.35);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,3,3)});ctx.globalAlpha=1;ctx.restore();
+}
+function loop(t){let dt=(t-last)/1000||0;last=t;update(dt);render();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+document.querySelectorAll('[data-dir]').forEach(btn=>{let d=btn.dataset.dir;const on=e=>{e.preventDefault();keys[d]=true;try{btn.setPointerCapture(e.pointerId)}catch(_){}};const off=e=>{e.preventDefault();keys[d]=false};btn.addEventListener('pointerdown',on);['pointerup','pointercancel','lostpointercapture'].forEach(ev=>btn.addEventListener(ev,off))});
+const fire=document.getElementById('fire');fire.addEventListener('pointerdown',e=>{e.preventDefault();fireHeld=true;try{fire.setPointerCapture(e.pointerId)}catch(_){}});['pointerup','pointercancel','lostpointercapture'].forEach(ev=>fire.addEventListener(ev,e=>{e.preventDefault();fireHeld=false}));
+addEventListener('keydown',e=>{let m={ArrowUp:'up',w:'up',ArrowDown:'down',s:'down',ArrowLeft:'left',a:'left',ArrowRight:'right',d:'right',' ':'fire'};let k=m[e.key];if(k){e.preventDefault();if(k==='fire')fireHeld=true;else keys[k]=true}});addEventListener('keyup',e=>{let m={ArrowUp:'up',w:'up',ArrowDown:'down',s:'down',ArrowLeft:'left',a:'left',ArrowRight:'right',d:'right',' ':'fire'};let k=m[e.key];if(k==='fire')fireHeld=false;else if(k)keys[k]=false});
+document.getElementById('start').addEventListener('click',async()=>{try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch(_){}resize();reset();running=true;menu.style.display='none'});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){keys={up:false,down:false,left:false,right:false};fireHeld=false}});
+})();
+</script>
+</body></html>

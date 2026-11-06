@@ -4,10 +4,8 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -44,7 +42,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         val subtitle = TextView(this).apply {
-            text = "by Astra"
+            text = "by Astra · версия 2.0"
             textSize = 16f
             setTextColor(0xFF8FB8FF.toInt())
             gravity = Gravity.CENTER
@@ -56,8 +54,17 @@ class MainActivity : Activity() {
             setPadding(0, dp(28), 0, dp(28))
         }
         val start = Button(this).apply {
-            text = "Включить индикатор"
-            setOnClickListener { enableOverlay() }
+            text = "Включить скорость в уведомлении"
+            setOnClickListener {
+                prefs.edit().putBoolean("enabled", true).apply()
+                val intent = Intent(this@MainActivity, SpeedService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+                refreshStatus()
+            }
         }
         val stop = Button(this).apply {
             text = "Выключить индикатор"
@@ -67,9 +74,12 @@ class MainActivity : Activity() {
                 refreshStatus()
             }
         }
-        val settings = Button(this).apply {
-            text = "Разрешение поверх окон"
-            setOnClickListener { openOverlaySettings() }
+        val hint = TextView(this).apply {
+            text = "Скорость загрузки и отдачи обновляется в постоянном уведомлении. Открой шторку уведомлений, чтобы увидеть цифры."
+            textSize = 14f
+            setTextColor(0xFFB8C4D8.toInt())
+            gravity = Gravity.CENTER
+            setPadding(0, dp(24), 0, 0)
         }
 
         root.addView(title, matchWidth())
@@ -77,28 +87,8 @@ class MainActivity : Activity() {
         root.addView(status, matchWidth())
         root.addView(start, matchWidth())
         root.addView(stop, matchWidth())
-        root.addView(settings, matchWidth())
+        root.addView(hint, matchWidth())
         setContentView(root)
-    }
-
-    private fun enableOverlay() {
-        if (!Settings.canDrawOverlays(this)) {
-            openOverlaySettings()
-            return
-        }
-        prefs.edit().putBoolean("enabled", true).apply()
-        val intent = Intent(this, SpeedService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-        else startService(intent)
-        refreshStatus()
-    }
-
-    private fun openOverlaySettings() {
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:$packageName")
-        )
-        startActivity(intent)
     }
 
     private fun askNotificationPermission() {
@@ -111,10 +101,11 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         val enabled = prefs.getBoolean("enabled", false)
-        val allowed = Settings.canDrawOverlays(this)
-        val state = if (enabled) "включён" else "выключен"
-        val permission = if (allowed) "есть" else "нужно выдать"
-        status.text = "Индикатор: $state\nРазрешение поверх окон: $permission"
+        status.text = if (enabled) {
+            "Индикатор: включён"
+        } else {
+            "Индикатор: выключен"
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

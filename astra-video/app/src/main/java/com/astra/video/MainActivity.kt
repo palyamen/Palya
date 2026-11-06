@@ -3,652 +3,622 @@ package com.astra.video
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
+import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import com.yausername.ffmpeg.FFmpeg
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLRequest
-import com.yausername.youtubedl_android.YoutubeDLException
-import com.yausername.ffmpeg.FFmpeg
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Locale
-import androidx.compose.ui.viewinterop.AndroidView
 
-private val Back = Color(0xFF0B0D12)
-private val Panel = Color(0xFF171B25)
-private val Accent = Color(0xFFFF3158)
-private val Muted = Color(0xFF9299A8)
+private val AppBack = Color(0xFF0B0D12)
+private val AppPanel = Color(0xFF171B25)
+private val AppAccent = Color(0xFFFF3158)
+private val AppMuted = Color(0xFF9299A8)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = AndroidColor.rgb(11, 13, 18)
-        window.navigationBarColor = AndroidColor.rgb(11, 13, 18)
+        window.statusBarColor = android.graphics.Color.rgb(11, 13, 18)
+        window.navigationBarColor = android.graphics.Color.rgb(11, 13, 18)
         try {
             YoutubeDL.getInstance().init(this)
             FFmpeg.getInstance().init(this)
-        } catch (e: YoutubeDLException) {
-            Toast.makeText(this, "Модуль загрузки видео не запустился: ${e.message}", Toast.LENGTH_LONG).show()
+        } catch (error: YoutubeDLException) {
+            Toast.makeText(this, "Модуль загрузки не запустился: " + error.message, Toast.LENGTH_LONG).show()
         }
         setContent { AstraVideoApp() }
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
+private class ActiveTask(val id: String, val title: String) {
+    var progress by mutableFloatStateOf(0f)
+    var status by mutableStateOf("В очереди")
+    var detail by mutableStateOf("")
+}
+
+private data class SystemDownload(
+    val id: Long,
+    val title: String,
+    val status: String,
+    val done: Long,
+    val total: Long
+)
+
 @Composable
 private fun AstraVideoApp() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
-    var query by remember { mutableStateOf("") }
-    var pageUrl by remember { mutableStateOf("") }
-    var videoUrl by remember { mutableStateOf("") }
-    var shareUrl by remember { mutableStateOf("") }
-    var showAppHeader by remember { mutableStateOf(true) }
+    var address by remember { mutableStateOf("https://www.google.com") }
+    var currentPage by remember { mutableStateOf("https://www.google.com") }
+    var pageTitle by remember { mutableStateOf("Главная") }
+    var selectedFile by remember { mutableStateOf<File?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val candidates = remember { mutableStateListOf<MediaCandidate>() }
+    val tasks = remember { mutableStateListOf<ActiveTask>() }
 
-    LaunchedEffect(tab) {
-        showAppHeader = true
-        kotlinx.coroutines.delay(4000)
-        showAppHeader = false
+    fun startPageDownload(page: String, title: String) {
+        if (tasks.any { it.status == "Скачивается" && it.title == title }) return
+        val task = ActiveTask(System.currentTimeMillis().toString(), title.ifBlank { "Видео со страницы" })
+        tasks.add(0, task)
+        scope.launch {
+            task.status = "Анализирую страницу"
+            try {
+                val file = DownloadEngine.downloadPage(context, page) { progress, line ->
+                    scope.launch(Dispatchers.Main) {
+                        task.progress = progress
+                        task.status = if (progress > 0f) "Скачивается" else "Анализирую страницу"
+                        task.detail = line
+                    }
+                }
+                task.progress = 100f
+                task.status = "Готово"
+                task.detail = file.name
+                refreshKey++
+                Toast.makeText(context, "Сохранено: " + file.name, Toast.LENGTH_LONG).show()
+            } catch (error: Exception) {
+                task.status = "Ошибка"
+                task.detail = error.message ?: "Не удалось получить видео"
+            }
+        }
     }
 
-    BackHandler(enabled = tab != 0) {
-        tab = 0
+    fun startDirectDownload(
+        url: String,
+        userAgent: String,
+        cookies: String?,
+        referer: String?,
+        contentDisposition: String?,
+        mimeType: String?
+    ) {
+        val path = Uri.parse(url).encodedPath.orEmpty().lowercase(Locale.ROOT)
+        if (path.endsWith(".m3u8") || path.endsWith(".mpd")) {
+            startPageDownload(url, "Потоковое видео")
+            return
+        }
+        try {
+            val item = DownloadEngine.enqueueDirect(
+                context, url, userAgent, cookies, referer, mimeType, contentDisposition
+            )
+            Toast.makeText(context, "Загрузка добавлена: " + item.title, Toast.LENGTH_SHORT).show()
+            refreshKey++
+        } catch (error: Exception) {
+            Toast.makeText(context, "Не удалось начать загрузку: " + error.message, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    BackHandler(enabled = selectedFile != null || tab != 0) {
+        if (selectedFile != null) selectedFile = null else tab = 0
     }
 
     MaterialTheme(colorScheme = darkColorScheme(
-        background = Back, surface = Panel, primary = Accent,
-        onBackground = Color.White, onSurface = Color.White
+        background = AppBack,
+        surface = AppPanel,
+        primary = AppAccent,
+        onBackground = Color.White,
+        onSurface = Color.White
     )) {
-        Scaffold(
-            containerColor = Back,
-            bottomBar = {
-                NavigationBar(containerColor = Panel, contentColor = Color.White) {
-                    NavigationBarItem(selected = tab == 0, onClick = { tab = 0 },
-                        icon = { Icon(Icons.Default.Search, null) }, label = { Text("Поиск") })
-                    NavigationBarItem(selected = tab == 1, onClick = { tab = 1 },
-                        icon = { Icon(Icons.Default.PlayCircle, null) }, label = { Text("Плеер") })
-                    NavigationBarItem(selected = tab == 2, onClick = { tab = 2 },
-                        icon = { Icon(Icons.Default.Download, null) }, label = { Text("Загрузки") })
-                    NavigationBarItem(selected = tab == 3, onClick = { tab = 3 },
-                        icon = { Icon(Icons.Default.Language, null) }, label = { Text("SaveFrom") })
-                }
-            }
-        ) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                if (showAppHeader) Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(Modifier.size(42.dp).background(Accent, RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(30.dp))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("ASTRA VIDEO", fontSize = 19.sp, fontWeight = FontWeight.Black, color = Color.White)
-                        Text("Видео рядом", fontSize = 11.sp, color = Muted)
-                    }
-                }
-
-                when (tab) {
-                    0 -> {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                                .background(Panel, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Search, null, tint = Muted)
-                            Spacer(Modifier.width(8.dp))
-                            BasicTextField(
-                                value = query, onValueChange = { query = it },
-                                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
-                                singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
-                                decorationBox = { inner ->
-                                    if (query.isEmpty()) Text("Найти видео на YouTube", color = Muted)
-                                    inner()
-                                }
-                            )
-                            IconButton(onClick = {
-                                if (query.isNotBlank()) {
-                                    pageUrl = "https://www.youtube.com/results?search_query=" + Uri.encode(query)
-                                }
-                            }) { Icon(Icons.Default.ArrowForward, "Искать", tint = Accent) }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        if (pageUrl.isNotEmpty()) {
-                            YoutubeWebView(url = pageUrl, onVideo = { url ->
-                                videoUrl = url
-                                val id = Uri.parse(url).lastPathSegment
-                                shareUrl = if (!id.isNullOrBlank()) "https://www.youtube.com/watch?v=$id" else url
-                                tab = 1
-                            }, modifier = Modifier.weight(1f))
-                        } else {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.OndemandVideo, null, tint = Accent, modifier = Modifier.size(64.dp))
-                                    Spacer(Modifier.height(14.dp))
-                                    Text("Ищи видео и смотри внутри приложения", color = Color.White, fontSize = 16.sp)
-                                    Spacer(Modifier.height(6.dp))
-                                    Text("Введи название в строку поиска", color = Muted, fontSize = 13.sp)
-                                }
-                            }
-                        }
-                    }
-                    1 -> {
-                        if (videoUrl.isNotBlank()) {
-                            Column(Modifier.fillMaxSize()) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                                        .background(Panel, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = shareUrl.ifBlank { videoUrl },
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    val context = LocalContext.current
-                                    IconButton(onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Ссылка на видео", shareUrl.ifBlank { videoUrl }))
-                                        Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
-                                    }) {
-                                        Icon(Icons.Default.ContentCopy, "Скопировать ссылку", tint = Accent)
-                                    }
-                                }
-                                YoutubeWebView(url = videoUrl, onVideo = { url ->
-                                    videoUrl = url
-                                    val id = Uri.parse(url).lastPathSegment
-                                    shareUrl = if (!id.isNullOrBlank()) "https://www.youtube.com/watch?v=$id" else url
-                                }, modifier = Modifier.weight(1f))
-                            }
-                        } else {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.PlayCircle, null, tint = Accent, modifier = Modifier.size(70.dp))
-                                    Spacer(Modifier.height(12.dp))
-                                    Text("Твой видеоплеер", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                                    Text("Выбери ролик в поиске YouTube", color = Muted, fontSize = 13.sp)
-                                }
-                            }
-                        }
-                    }
-                    2 -> DownloadsScreen()
-                    else -> SaveFromScreen()
-                }
-            }
-        }
-    }
-}
-
-private data class DownloadItem(
-    val id: Long, val title: String, val status: String,
-    val downloaded: Long, val total: Long, val mime: String
-)
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 0) return "размер неизвестен"
-    if (bytes < 1024) return "$bytes Б"
-    if (bytes < 1024 * 1024) return String.format(Locale.getDefault(), "%.1f КБ", bytes / 1024.0)
-    if (bytes < 1024L * 1024L * 1024L) return String.format(Locale.getDefault(), "%.1f МБ", bytes / (1024.0 * 1024.0))
-    return String.format(Locale.getDefault(), "%.2f ГБ", bytes / (1024.0 * 1024.0 * 1024.0))
-}
-
-@Composable
-private fun DownloadsScreen() {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var url by remember { mutableStateOf("") }
-    var fileName by remember { mutableStateOf("") }
-    var refreshKey by remember { mutableIntStateOf(0) }
-    var checking by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("") }
-    var extractorProgress by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(Unit) {
-        while (true) { delay(1200); refreshKey++ }
-    }
-
-    val downloads = remember(refreshKey) {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val result = mutableListOf<DownloadItem>()
-        val cursor = manager.query(DownloadManager.Query())
-        cursor?.use {
-            val idCol = it.getColumnIndex(DownloadManager.COLUMN_ID)
-            val titleCol = it.getColumnIndex(DownloadManager.COLUMN_TITLE)
-            val statusCol = it.getColumnIndex(DownloadManager.COLUMN_STATUS)
-            val totalCol = it.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-            val doneCol = it.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-            val mimeCol = it.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
-            while (it.moveToNext()) {
-                val status = when (it.getInt(statusCol)) {
-                    DownloadManager.STATUS_SUCCESSFUL -> "Готово"
-                    DownloadManager.STATUS_FAILED -> "Ошибка загрузки"
-                    DownloadManager.STATUS_RUNNING -> "Загружается"
-                    DownloadManager.STATUS_PENDING -> "В очереди"
-                    DownloadManager.STATUS_PAUSED -> "Приостановлено"
-                    else -> "Неизвестно"
-                }
-                result.add(DownloadItem(
-                    it.getLong(idCol), it.getString(titleCol) ?: "Файл", status,
-                    if (doneCol >= 0) it.getLong(doneCol) else 0L,
-                    if (totalCol >= 0) it.getLong(totalCol) else -1L,
-                    if (mimeCol >= 0) it.getString(mimeCol).orEmpty() else ""
-                ))
-            }
-        }
-        result.reversed()
-    }
-
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        Text("Загрузки", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text("Вставь ссылку YouTube (включая m.youtube.com) или прямую ссылку на медиафайл.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
-        Spacer(Modifier.height(18.dp))
-        Text("Ссылка на видео", color = Color.White, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        InputPanel(value = url, onValueChange = { url = it }, hint = "https://m.youtube.com/watch?v=...")
-        Spacer(Modifier.height(12.dp))
-        Text("Имя файла (необязательно)", color = Color.White, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        InputPanel(value = fileName, onValueChange = { fileName = it }, hint = "Моё видео.mp4")
-        Spacer(Modifier.height(14.dp))
-        Button(
-            onClick = {
-                val rawInput = url.trim()
-                val enteredUrl = if (rawInput.startsWith("https://", true) || rawInput.startsWith("http://", true)) rawInput else "https://$rawInput"
-                val parsed = Uri.parse(enteredUrl)
-                if ((parsed.scheme == "https" || parsed.scheme == "http") && !parsed.host.isNullOrBlank()) {
-                    scope.launch {
-                        checking = true
-                        val host = parsed.host.orEmpty().lowercase(Locale.ROOT).removePrefix("www.").removePrefix("m.")
-                        val normalizedUrl = enteredUrl.lowercase(Locale.ROOT)
-                        val isYouTube = host == "youtu.be" || host.endsWith(".youtu.be") ||
-                            host == "youtube.com" || host.endsWith(".youtube.com") ||
-                            normalizedUrl.contains("youtube.com/") || normalizedUrl.contains("youtu.be/")
-                        if (isYouTube) {
-                            message = "Распознала YouTube. Получаю варианты видео…"
-                            extractorProgress = 0f
-                            val result = withContext(Dispatchers.IO) {
-                                try {
-                                    val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Astra Video")
-                                    if (!dir.exists()) dir.mkdirs()
-                                    val request = YoutubeDLRequest(enteredUrl)
-                                    request.addOption("--no-playlist")
-                                    request.addOption("--no-mtime")
-                                    request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
-                                    request.addOption("--merge-output-format", "mp4")
-                                    request.addOption("-o", dir.absolutePath + "/%(title).180B.%(ext)s")
-                                    YoutubeDL.getInstance().execute(request, "astra-video-download") { progress, _, line ->
-                                        extractorProgress = progress.coerceIn(0f, 100f)
-                                        message = if (line.isNotBlank()) line.takeLast(180) else "Скачиваю видео…"
-                                    }
-                                    "Готово! Файл сохранён в Загрузки/Astra Video."
-                                } catch (e: Exception) {
-                                    "Не удалось скачать видео: " + (e.message ?: "ошибка извлечения").take(220)
-                                }
-                            }
-                            message = result
-                            checking = false
-                            refreshKey++
-                        } else {
-                        message = "Проверяю прямую ссылку и тип файла…"
-                        val check = withContext(Dispatchers.IO) {
-                            try {
-                                val connection = (URL(enteredUrl).openConnection() as HttpURLConnection).apply {
-                                    requestMethod = "HEAD"
-                                    connectTimeout = 12000
-                                    readTimeout = 12000
-                                    instanceFollowRedirects = true
-                                    setRequestProperty("User-Agent", "Mozilla/5.0 AstraVideo")
-                                }
-                                val code = connection.responseCode
-                                val mime = connection.contentType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
-                                val length = connection.contentLengthLong
-                                connection.disconnect()
-                                Triple(code, mime, length)
-                            } catch (_: Exception) { Triple(-1, "", -1L) }
-                        }
-                        val (code, mime, length) = check
-                        val pathPart = Uri.parse(enteredUrl).lastPathSegment.orEmpty().lowercase(Locale.ROOT)
-                        val mediaExtension = listOf(".mp4", ".m4v", ".webm", ".mkv", ".mov", ".mp3", ".m4a", ".aac", ".ogg", ".wav").any { pathPart.endsWith(it) }
-                        val isMedia = mime.startsWith("video/") || mime.startsWith("audio/") ||
-                            mime == "application/octet-stream" && mediaExtension
-                        if (code in 200..299 && (mime == "text/html" || mime == "application/json" || mime.startsWith("text/"))) {
-                            message = "Это веб-страница, а не видеофайл. Нужна прямая ссылка на .mp4 или другой медиафайл."
-                        } else if (code in 200..299 && !isMedia && !mediaExtension) {
-                            message = "Сервер не подтвердил, что по ссылке находится видео или аудио. Загрузка отменена."
-                        } else if (code in 200..299 || code == -1 && mediaExtension) {
-                            try {
-                                val guessed = parsed.lastPathSegment?.takeIf { it.contains('.') } ?: ("astra_video_" + System.currentTimeMillis() + ".mp4")
-                                val safeName = fileName.trim().ifBlank { guessed }.map { if (it.isLetterOrDigit() || it in " ._-") it else '_' }.joinToString("")
-                                val request = DownloadManager.Request(parsed)
-                                    .setTitle(safeName)
-                                    .setDescription("Astra Video • " + if (length > 0) formatBytes(length) else "размер уточняется")
-                                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                    .setAllowedOverMetered(true)
-                                    .setAllowedOverRoaming(false)
-                                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                                if (mime.isNotBlank()) request.setMimeType(mime)
-                                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                                manager.enqueue(request)
-                                message = "Загрузка началась • " + if (length > 0) formatBytes(length) else "размер неизвестен"
-                                url = ""
-                                fileName = ""
-                                refreshKey++
-                            } catch (_: Exception) {
-                                message = "Не удалось начать загрузку. Проверь ссылку и свободное место."
-                            }
-                        } else {
-                            message = "Сервер вернул ошибку HTTP $code. Проверь ссылку."
-                        }
-                        checking = false
-                        }
-                    }
-                } else { message = "Введи корректную http/https-ссылку." }
-            },
-            enabled = !checking,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Accent)
-        ) {
-            if (checking) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text("Проверяю ссылку…")
-            } else {
-                Icon(Icons.Default.Download, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Проверить и скачать")
-            }
-        }
-        if (message.isNotBlank()) {
-            Spacer(Modifier.height(10.dp))
-            if (extractorProgress > 0f && extractorProgress < 100f) {
-                LinearProgressIndicator(progress = { extractorProgress / 100f }, modifier = Modifier.fillMaxWidth(), color = Accent)
-                Text("YouTube: ${extractorProgress.toInt()}%", color = Muted, fontSize = 11.sp)
-            }
-            Text(message, color = if (message.contains("отменена") || message.contains("ошибку") || message.contains("страница")) Accent else Muted, fontSize = 12.sp, lineHeight = 17.sp)
-        }
-        Spacer(Modifier.height(22.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Мои загрузки", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            IconButton(onClick = { refreshKey++ }) { Icon(Icons.Default.Refresh, "Обновить", tint = Accent) }
-        }
-        if (downloads.isEmpty()) {
-            Text("Пока ничего не загружено", color = Muted, fontSize = 13.sp)
+        if (selectedFile != null) {
+            VideoPlayerScreen(file = selectedFile!!, onBack = { selectedFile = null })
         } else {
-            downloads.forEach { item ->
-                Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).background(Panel, RoundedCornerShape(14.dp)).padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.InsertDriveFile, null, tint = Accent)
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
-                            Text(item.status, color = if (item.status == "Ошибка загрузки") Accent else Muted, fontSize = 12.sp)
-                        }
-                        Text(if (item.total > 0) formatBytes(item.downloaded) + " / " + formatBytes(item.total) else formatBytes(item.downloaded), color = Muted, fontSize = 11.sp)
-                    }
-                    if (item.status == "Загружается" && item.total > 0) {
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { (item.downloaded.toFloat() / item.total).coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth(), color = Accent
+            Scaffold(
+                containerColor = AppBack,
+                bottomBar = {
+                    NavigationBar(containerColor = AppPanel, contentColor = Color.White) {
+                        NavigationBarItem(
+                            selected = tab == 0, onClick = { tab = 0 },
+                            icon = { Icon(Icons.Default.Language, null) }, label = { Text("Браузер") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 1, onClick = { tab = 1 },
+                            icon = { Icon(Icons.Default.Download, null) }, label = { Text("Загрузки") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 2, onClick = { tab = 2 },
+                            icon = { Icon(Icons.Default.VideoLibrary, null) }, label = { Text("Медиатека") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 3, onClick = { tab = 3 },
+                            icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Настройки") }
                         )
                     }
-                    if (item.status == "Готово") {
-                        Spacer(Modifier.height(6.dp))
-                        Text("Тип: " + item.mime.ifBlank { "не определён" } + " • Размер: " + formatBytes(item.total), color = Muted, fontSize = 11.sp)
-                        TextButton(onClick = {
-                            try {
-                                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                                val fileUri = manager.getUriForDownloadedFile(item.id)
-                                if (fileUri == null) {
-                                    Toast.makeText(context, "Файл не найден", Toast.LENGTH_SHORT).show()
+                }
+            ) { padding ->
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    AppHeader()
+                    when (tab) {
+                        0 -> BrowserScreen(
+                            address = address,
+                            currentPage = currentPage,
+                            pageTitle = pageTitle,
+                            candidates = candidates,
+                            onAddressChange = { address = it },
+                            onNavigate = { input ->
+                                val trimmed = input.trim()
+                                val target = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                                    trimmed
+                                } else if (trimmed.contains(".") && !trimmed.contains(" ")) {
+                                    "https://" + trimmed
                                 } else {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(fileUri, item.mime.ifBlank { "*/*" })
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Открыть файл"))
+                                    "https://www.google.com/search?q=" + Uri.encode(trimmed)
                                 }
-                            } catch (_: Exception) {
-                                Toast.makeText(context, "Не найдено приложение для открытия файла", Toast.LENGTH_SHORT).show()
+                                address = target
+                                currentPage = target
+                                candidates.clear()
+                            },
+                            onPageChanged = { url, title ->
+                                if (url.isNotBlank()) {
+                                    currentPage = url
+                                    address = url
+                                }
+                                if (title.isNotBlank()) pageTitle = title
+                            },
+                            onMediaFound = { candidate ->
+                                if (candidates.none { it.url == candidate.url }) candidates.add(candidate)
+                            },
+                            onDownloadPage = { startPageDownload(currentPage, pageTitle) },
+                            onDownloadCandidate = { candidate ->
+                                if (candidate.kind.contains("поток")) {
+                                    startPageDownload(candidate.url, candidate.kind)
+                                } else {
+                                    startDirectDownload(
+                                        candidate.url, "Mozilla/5.0 AstraVideo",
+                                        CookieManager.getInstance().getCookie(candidate.url),
+                                        currentPage, null, null
+                                    )
+                                }
+                            },
+                            onDirectDownload = { url, agent, cookies, referer, disposition, mime ->
+                                startDirectDownload(url, agent, cookies, referer, disposition, mime)
                             }
-                        }) {
-                            Icon(Icons.Default.PlayArrow, null, tint = Accent)
-                            Spacer(Modifier.width(5.dp))
-                            Text("Открыть файл", color = Accent)
-                        }
-                    }
-                    if (item.status == "Ошибка загрузки") {
-                        Text("Загрузка не завершилась. Попробуй другую прямую ссылку.", color = Muted, fontSize = 11.sp)
+                        )
+                        1 -> DownloadsScreen(tasks, refreshKey, onRefresh = { refreshKey++ })
+                        2 -> LibraryScreen(refreshKey) { selectedFile = it }
+                        else -> SettingsScreen()
                     }
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Text("YouTube-ссылки обрабатываются встроенным yt-dlp. Скачивай только материалы, на которые у тебя есть права или разрешение владельца. Прямые ссылки на MP4/WebM по-прежнему поддерживаются.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
     }
 }
 
 @Composable
-private fun InputPanel(value: String, onValueChange: (String) -> Unit, hint: String) {
+private fun AppHeader() {
     Row(
-        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BasicTextField(
-            value = value, onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
-            decorationBox = { inner ->
-                if (value.isEmpty()) Text(hint, color = Muted, fontSize = 14.sp)
-                inner()
-            }
-        )
+        Box(
+            Modifier.size(42.dp).background(AppAccent, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text("ASTRA VIDEO", fontSize = 19.sp, fontWeight = FontWeight.Black, color = Color.White)
+            Text("Браузер и загрузчик видео", fontSize = 11.sp, color = AppMuted)
+        }
     }
 }
-
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun SaveFromScreen() {
-    val context = LocalContext.current
-    var loadError by remember { mutableStateOf("") }
+private fun BrowserScreen(
+    address: String,
+    currentPage: String,
+    pageTitle: String,
+    candidates: List<MediaCandidate>,
+    onAddressChange: (String) -> Unit,
+    onNavigate: (String) -> Unit,
+    onPageChanged: (String, String) -> Unit,
+    onMediaFound: (MediaCandidate) -> Unit,
+    onDownloadPage: () -> Unit,
+    onDownloadCandidate: (MediaCandidate) -> Unit,
+    onDirectDownload: (String, String, String?, String?, String?, String?) -> Unit
+) {
+    var progress by remember { mutableIntStateOf(0) }
+    var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("SaveFrom", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text("Вставь ссылку на видео на сайте", color = Muted, fontSize = 11.sp)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { webView?.goBack() }, enabled = webView?.canGoBack() == true) {
+                Icon(Icons.Default.ArrowBack, "Назад", tint = Color.White)
             }
-            TextButton(onClick = { loadError = "" }) { Text("Обновить", color = Accent) }
+            IconButton(onClick = { webView?.goForward() }, enabled = webView?.canGoForward() == true) {
+                Icon(Icons.Default.ArrowForward, "Вперёд", tint = Color.White)
+            }
+            OutlinedTextField(
+                value = address,
+                onValueChange = onAddressChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp),
+                placeholder = { Text("Адрес сайта или поиск", fontSize = 12.sp) },
+                shape = RoundedCornerShape(14.dp)
+            )
+            IconButton(onClick = { onNavigate(address) }) {
+                Icon(Icons.Default.Search, "Перейти", tint = AppAccent)
+            }
         }
-        if (loadError.isNotBlank()) Text(loadError, color = Accent, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+        if (progress in 1..99) {
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier.fillMaxWidth(),
+                color = AppAccent
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(pageTitle.ifBlank { "Страница" }, color = Color.White, fontSize = 13.sp, maxLines = 1)
+                Text("Найдено медиа: " + candidates.size, color = AppMuted, fontSize = 11.sp)
+            }
+            TextButton(onClick = onDownloadPage) {
+                Icon(Icons.Default.Download, null, tint = AppAccent)
+                Spacer(Modifier.width(4.dp))
+                Text("Скачать страницу", color = AppAccent, fontSize = 12.sp)
+            }
+        }
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                WebView(ctx).apply {
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            factory = { context ->
+                android.webkit.WebView(context).apply {
+                    webView = this
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.loadsImagesAutomatically = true
-                    settings.javaScriptCanOpenWindowsAutomatically = true
+                    settings.mediaPlaybackRequiresUserGesture = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.javaScriptCanOpenWindowsAutomatically = false
                     settings.setSupportMultipleWindows(false)
-                    webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {
-                        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
-                            if (request.isForMainFrame) loadError = "Не удалось открыть SaveFrom"
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onProgressChanged(view: android.webkit.WebView, newProgress: Int) {
+                            progress = newProgress
+                        }
+                        override fun onReceivedTitle(view: android.webkit.WebView, title: String?) {
+                            onPageChanged(view.url.orEmpty(), title.orEmpty())
+                        }
+                    }
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: android.webkit.WebView,
+                            request: android.webkit.WebResourceRequest
+                        ): Boolean = false
+
+                        override fun onPageStarted(
+                            view: android.webkit.WebView,
+                            url: String,
+                            favicon: android.graphics.Bitmap?
+                        ) {
+                            onPageChanged(url, view.title.orEmpty())
+                        }
+
+                        override fun onLoadResource(view: android.webkit.WebView, url: String) {
+                            MediaDetector.detect(url)?.let(onMediaFound)
+                        }
+
+                        override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                            onPageChanged(url, view.title.orEmpty())
+                            val script = """
+                                (function() {
+                                  var re = /\.(mp4|m4v|webm|mkv|mov|m3u8|mpd|mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i;
+                                  return JSON.stringify(performance.getEntriesByType('resource')
+                                    .map(function(e) { return e.name; })
+                                    .filter(function(name) { return re.test(name); }));
+                                })();
+                            """.trimIndent()
+                            evaluateJavascript(script) { result ->
+                                runCatching {
+                                    val json = org.json.JSONTokener(result).nextValue() as? String ?: return@runCatching
+                                    val array = org.json.JSONArray(json)
+                                    for (index in 0 until array.length()) {
+                                        MediaDetector.detect(array.optString(index))?.let(onMediaFound)
+                                    }
+                                }
+                            }
                         }
                     }
                     setDownloadListener { downloadUrl, userAgent, contentDisposition, mimeType, _ ->
-                        try {
-                            val uri = Uri.parse(downloadUrl)
-                            if (uri.scheme != "https" && uri.scheme != "http") {
-                                Toast.makeText(ctx, "Неподдерживаемая ссылка загрузки", Toast.LENGTH_LONG).show()
-                                return@setDownloadListener
-                            }
-                            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Astra Video")
-                            if (!dir.exists()) dir.mkdirs()
-                            val guessed = android.webkit.URLUtil.guessFileName(downloadUrl, contentDisposition, mimeType)
-                            val cleanName = guessed.ifBlank { "savefrom_video.mp4" }.map {
-                                if (it.isLetterOrDigit() || it in "._- ()") it else '_'
-                            }.joinToString("")
-                            val request = DownloadManager.Request(uri)
-                                .setTitle(cleanName)
-                                .setDescription("SaveFrom • Astra Video")
-                                .setMimeType(mimeType ?: "application/octet-stream")
-                                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                .setAllowedOverMetered(true)
-                                .setAllowedOverRoaming(false)
-                                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Astra Video/$cleanName")
-                            if (!userAgent.isNullOrBlank()) request.addRequestHeader("User-Agent", userAgent)
-                            val cookies = android.webkit.CookieManager.getInstance().getCookie(downloadUrl)
-                            if (!cookies.isNullOrBlank()) request.addRequestHeader("Cookie", cookies)
-                            request.addRequestHeader("Referer", "https://ru.savefrom.net/")
-                            val manager = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                            manager.enqueue(request)
-                            Toast.makeText(ctx, "Скачивание началось: $cleanName", Toast.LENGTH_LONG).show()
-                        } catch (e: Exception) {
-                            Toast.makeText(ctx, "Ошибка запуска загрузки", Toast.LENGTH_LONG).show()
-                        }
+                        val cookies = CookieManager.getInstance().getCookie(downloadUrl)
+                        onDirectDownload(
+                            downloadUrl, userAgent.orEmpty(), cookies, url,
+                            contentDisposition, mimeType
+                        )
                     }
-                    loadUrl("https://ru.savefrom.net/247hU/")
+                    tag = currentPage
+                    loadUrl(currentPage)
                 }
             },
             update = { view ->
-                if (view.url.isNullOrBlank()) view.loadUrl("https://ru.savefrom.net/247hU/")
+                if (view.tag != currentPage) {
+                    view.tag = currentPage
+                    view.loadUrl(currentPage)
+                }
             }
+        )
+        if (candidates.isNotEmpty()) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 170.dp)
+                    .background(AppPanel).padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text("Обнаруженные файлы", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                LazyColumn {
+                    items(candidates.take(8), key = { it.url }) { item ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onDownloadCandidate(item) }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (item.kind.contains("Аудио")) Icons.Default.AudioFile else Icons.Default.VideoFile,
+                                null, tint = AppAccent
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(item.kind, color = Color.White, fontSize = 12.sp)
+                                Text(item.url, color = AppMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            IconButton(onClick = { onDownloadCandidate(item) }) {
+                                Icon(Icons.Default.Download, "Скачать", tint = AppAccent)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadsScreen(
+    tasks: SnapshotStateList<ActiveTask>,
+    refreshKey: Int,
+    onRefresh: () -> Unit
+) {
+    val context = LocalContext.current
+    val directDownloads = remember(refreshKey) {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val values = mutableListOf<SystemDownload>()
+        manager.query(DownloadManager.Query())?.use { cursor ->
+            val idCol = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
+            val titleCol = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+            val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            val doneCol = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val totalCol = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            while (cursor.moveToNext()) {
+                val status = when (cursor.getInt(statusCol)) {
+                    DownloadManager.STATUS_SUCCESSFUL -> "Готово"
+                    DownloadManager.STATUS_FAILED -> "Ошибка"
+                    DownloadManager.STATUS_RUNNING -> "Скачивается"
+                    DownloadManager.STATUS_PENDING -> "В очереди"
+                    DownloadManager.STATUS_PAUSED -> "Пауза"
+                    else -> "Неизвестно"
+                }
+                values.add(
+                    SystemDownload(
+                        cursor.getLong(idCol),
+                        cursor.getString(titleCol) ?: "Файл",
+                        status,
+                        cursor.getLong(doneCol),
+                        cursor.getLong(totalCol)
+                    )
+                )
+            }
+        }
+        values.reversed()
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            onRefresh()
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Загрузки", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, "Обновить", tint = AppAccent) }
+        }
+        Text("Активные задачи", color = AppMuted, fontSize = 12.sp)
+        LazyColumn(Modifier.weight(1f)) {
+            items(tasks, key = { it.id }) { task ->
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                        .background(AppPanel, RoundedCornerShape(14.dp)).padding(13.dp)
+                ) {
+                    Text(task.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
+                    Text(task.status, color = if (task.status == "Ошибка") AppAccent else AppMuted, fontSize = 12.sp)
+                    if (task.status == "Скачивается" || task.progress > 0f) {
+                        LinearProgressIndicator(
+                            progress = { task.progress / 100f },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            color = AppAccent
+                        )
+                    }
+                    if (task.detail.isNotBlank()) {
+                        Text(task.detail, color = AppMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            item {
+                Spacer(Modifier.height(12.dp))
+                Text("Загрузки Android", color = AppMuted, fontSize = 12.sp)
+            }
+            items(directDownloads, key = { it.id }) { item ->
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                        .background(AppPanel, RoundedCornerShape(14.dp)).padding(13.dp)
+                ) {
+                    Text(item.title, color = Color.White, fontSize = 14.sp, maxLines = 2)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(item.status, color = AppMuted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        Text(formatBytes(item.done) + " / " + formatBytes(item.total), color = AppMuted, fontSize = 10.sp)
+                    }
+                    if (item.status == "Скачивается" && item.total > 0) {
+                        LinearProgressIndicator(
+                            progress = { (item.done.toFloat() / item.total).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
+                            color = AppAccent
+                        )
+                    }
+                    if (item.status == "Ошибка") {
+                        TextButton(onClick = { DownloadEngine.cancelDirect(context, item.id); onRefresh() }) {
+                            Text("Удалить задачу", color = AppAccent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryScreen(refreshKey: Int, onOpen: (File) -> Unit) {
+    val context = LocalContext.current
+    val files = remember(refreshKey) { DownloadEngine.listFiles(context) }
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        Text("Медиатека", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text(files.size.toString() + " файлов", color = AppMuted, fontSize = 12.sp)
+        Spacer(Modifier.height(12.dp))
+        if (files.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Здесь появятся скачанные видео и аудио", color = AppMuted)
+            }
+        } else {
+            LazyColumn {
+                items(files, key = { it.absolutePath }) { file ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                            .background(AppPanel, RoundedCornerShape(14.dp))
+                            .clickable { onOpen(file) }.padding(13.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.VideoFile, null, tint = AppAccent, modifier = Modifier.size(30.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(file.name, color = Color.White, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(formatBytes(file.length()) + " • " + file.extension.uppercase(), color = AppMuted, fontSize = 11.sp)
+                        }
+                        Icon(Icons.Default.PlayArrow, "Открыть", tint = AppAccent)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen() {
+    val context = LocalContext.current
+    val directory = DownloadEngine.outputDirectory(context)
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Text("Настройки", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(18.dp))
+        Text("Папка сохранения", color = Color.White, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Text(directory.absolutePath, color = AppMuted, fontSize = 12.sp)
+        Spacer(Modifier.height(18.dp))
+        Text("Astra Video определяет доступные медиафайлы в браузере и использует отдельный загрузчик для страниц и потоков.", color = AppMuted, fontSize = 13.sp, lineHeight = 19.sp)
+        Spacer(Modifier.height(12.dp))
+        Text("Загружай только материалы, которые разрешено сохранять. Защищённые DRM-потоки не поддерживаются.", color = AppMuted, fontSize = 12.sp, lineHeight = 18.sp)
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun VideoPlayerScreen(file: File, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val player = remember(file.absolutePath) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+            prepare()
+            playWhenReady = true
+        }
+    }
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+    Column(Modifier.fillMaxSize().background(AppBack)) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Назад", tint = Color.White) }
+            Text(file.name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        }
+        AndroidView(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = true } },
+            update = { it.player = player }
         )
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun YoutubeWebView(url: String, onVideo: (String) -> Unit, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    AndroidView(
-        modifier = modifier,
-        factory = {
-            WebView(context).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.mediaPlaybackRequiresUserGesture = true
-                settings.userAgentString = settings.userAgentString + " AstraVideo/1.1"
-                webChromeClient = AstraChromeClient(context)
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                        val uri = request.url
-                        val host = uri.host.orEmpty()
-                        val id = when {
-                            host.contains("youtu.be") -> uri.lastPathSegment
-                            uri.getQueryParameter("v") != null -> uri.getQueryParameter("v")
-                            uri.pathSegments.contains("shorts") -> uri.pathSegments.getOrNull(uri.pathSegments.indexOf("shorts") + 1)
-                            else -> null
-                        }
-                        if (!id.isNullOrBlank() && (host.contains("youtube.com") || host.contains("youtu.be"))) {
-                            onVideo("https://www.youtube.com/embed/$id?autoplay=1&playsinline=1")
-                            return true
-                        }
-                        return false
-                    }
-                }
-                loadUrl(url)
-            }
-        },
-        update = { view ->
-            if (view.tag != url) {
-                view.tag = url
-                view.loadUrl(url)
-            }
-        }
-    )
-}
-
-private class AstraChromeClient(private val context: Context) : WebChromeClient() {
-    private var customView: View? = null
-    private var customViewCallback: CustomViewCallback? = null
-    private var originalSystemUi = 0
-    private var originalOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-
-    override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-        if (customView != null) {
-            callback.onCustomViewHidden()
-            return
-        }
-        val activity = context as? ComponentActivity ?: return
-        val decor = activity.window.decorView as? FrameLayout ?: return
-        customView = view
-        customViewCallback = callback
-        originalSystemUi = decor.systemUiVisibility
-        originalOrientation = activity.requestedOrientation
-        (view.parent as? ViewGroup)?.removeView(view)
-        decor.addView(view, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        ))
-        decor.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
-        activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-    }
-
-    override fun onHideCustomView() {
-        val activity = context as? ComponentActivity
-        val decor = activity?.window?.decorView as? FrameLayout
-        customView?.let { decor?.removeView(it) }
-        customView = null
-        customViewCallback?.onCustomViewHidden()
-        customViewCallback = null
-        if (activity != null) {
-            decor?.systemUiVisibility = originalSystemUi
-            activity.requestedOrientation = originalOrientation
-        }
-    }
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 0) return "—"
+    if (bytes < 1024) return bytes.toString() + " Б"
+    if (bytes < 1024 * 1024) return String.format(Locale.getDefault(), "%.1f КБ", bytes / 1024.0)
+    if (bytes < 1024L * 1024L * 1024L) return String.format(Locale.getDefault(), "%.1f МБ", bytes / (1024.0 * 1024.0))
+    return String.format(Locale.getDefault(), "%.2f ГБ", bytes / (1024.0 * 1024.0 * 1024.0))
 }

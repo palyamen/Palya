@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#101910"><title>ALIVE 0.1</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101910;color:#edf3df;font-family:system-ui,Arial}#app{height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:10px;padding:10px}#world{width:100%;height:100%;background:#294b30;border:1px solid #657c55;border-radius:12px;touch-action:manipulation}aside{display:flex;flex-direction:column;gap:9px;min-width:0}.card{background:#1b2a20;border:1px solid #435c43;border-radius:12px;padding:10px}.title{font-weight:900;letter-spacing:1px;color:#c5e58a}.stat{font-size:13px;line-height:1.55}.bar{height:7px;background:#354438;border-radius:8px;overflow:hidden;margin:2px 0 6px}.bar i{display:block;height:100%;background:#b4d875;width:0}.muted{color:#a8b9a0;font-size:11px}.log{font-size:12px;line-height:1.45;overflow:auto;flex:1;min-height:90px}.log div{border-bottom:1px solid #344638;padding:4px 0}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:6px}button{background:#b8d77b;color:#1a2818;border:0;border-radius:9px;padding:10px;font-weight:800}button.secondary{background:#344b38;color:#e4efdb;border:1px solid #60765b}#goal{font-size:14px;font-weight:800;color:#f3d58a}.dead{color:#ff9b91}
+@media(max-width:700px){#app{grid-template-columns:1fr;grid-template-rows: minmax(0,1fr) auto;padding:6px;gap:6px}aside{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto 90px;gap:6px}.card{padding:7px}.logcard{grid-column:1/3}.log{max-height:80px}.stat{font-size:11px}.title{font-size:14px}.buttons{grid-column:1/3}}
+</style></head><body><div id="app"><canvas id="world"></canvas><aside>
+<section class="card"><div class="title">ALIVE 0.1</div><div class="muted">АВТОНОМНАЯ СИМУЛЯЦИЯ · OFFLINE</div><div id="day" class="stat">День 1</div><div id="goal">Решение ИИ: осматривается</div></section>
+<section class="card"><div class="stat" id="stats"></div></section>
+<section class="card"><div class="title">РЕСУРСЫ</div><div id="resources" class="stat"></div><div class="muted" id="shelter">Убежище: нет</div></section>
+<section class="card logcard"><div class="title">ПАМЯТЬ И СОБЫТИЯ</div><div id="log" class="log"></div></section>
+<div class="buttons"><button id="pause">Пауза</button><button class="secondary" id="save">Сохранить</button><button class="secondary" id="load">Загрузить</button><button class="secondary" id="reset">Новый мир</button></div>
+</aside></div>
+<script>
+(()=>{'use strict';
+const c=document.getElementById('world'),ctx=c.getContext('2d'),W=28,H=19;let map=[],running=true,timer=0,tick=0,logs=[];
+let a={x:14,y:9,hp:100,hunger:8,thirst:5,energy:95,wood:0,food:0,water:0,shelter:false,day:1,goal:'Изучает местность',memory:[],steps:0};
+const el=id=>document.getElementById(id),rnd=n=>Math.floor(Math.random()*n);
+function makeWorld(){map=Array.from({length:H},()=>Array.from({length:W},()=>{let n=Math.random();return n<.14?'tree':n<.19?'berry':n<.22?'water':n<.25?'stone':'grass'}));map[a.y][a.x]='grass';for(let i=0;i<5;i++){let x=rnd(W),y=rnd(H);map[y][x]='water'}}
+function log(s){logs.unshift('Д'+a.day+' · '+s);logs=logs.slice(0,18);a.memory.push(s);a.memory=a.memory.slice(-30)}
+function nearest(type){let best=null,dist=1e9;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(map[y][x]===type){let d=Math.abs(x-a.x)+Math.abs(y-a.y);if(d<dist){dist=d;best={x,y,d}}}return best}
+function move(t){let dx=Math.sign(t.x-a.x),dy=Math.sign(t.y-a.y),opts=Math.random()<.5?[[dx,0],[0,dy]]:[[0,dy],[dx,0]];for(let [x,y] of opts){let nx=a.x+x,ny=a.y+y;if((x||y)&&nx>=0&&ny>=0&&nx<W&&ny<H&&map[ny][nx]!=='water'){a.x=nx;a.y=ny;return}}wander()}
+function wander(){for(let [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]].sort(()=>Math.random()-.5)){let x=a.x+dx,y=a.y+dy;if(x>=0&&y>=0&&x<W&&y<H&&map[y][x]!=='water'){a.x=x;a.y=y;return}}}
+function act(){a.steps++;a.hunger=Math.min(100,a.hunger+.42);a.thirst=Math.min(100,a.thirst+.62);a.energy=Math.max(0,a.energy-.12);if(a.hunger>88||a.thirst>88)a.hp=Math.max(0,a.hp-.8);
+if(a.hp<=0){a.goal='Погиб';running=false;log('Персонаж погиб.');return}
+if(a.thirst>38&&a.water>0){a.water--;a.thirst=Math.max(0,a.thirst-35);a.goal='Пьёт воду';return}
+if(a.hunger>40&&a.food>0){a.food--;a.hunger=Math.max(0,a.hunger-32);a.goal='Ест найденную пищу';return}
+if(a.energy<15){a.energy=Math.min(100,a.energy+2.8);a.goal='Отдыхает';return}
+let type,goal;if(a.thirst>35||a.water<2){type='water';goal='Ищет воду'}else if(a.hunger>30||a.food<2){type='berry';goal='Ищет пищу'}else if(!a.shelter&&a.wood<6){type='tree';goal='Собирает древесину'}else if(!a.shelter){a.shelter=true;a.wood-=6;a.goal='Построил убежище';log('Самостоятельно построил первое убежище.');return}else if(a.food<4){type='berry';goal='Запасает ягоды'}else if(a.water<4){type='water';goal='Пополняет воду'}else{a.goal='Исследует окрестности';wander();return}
+a.goal=goal;let t=nearest(type);if(!t){wander();return}if(t.d<=1){if(type==='water'){a.water+=2;log('Нашёл воду и наполнил запас.')}if(type==='berry'){a.food+=2;log('Собрал лесные ягоды.')}if(type==='tree'){a.wood+=2;log('Добыл древесину.')}map[t.y][t.x]='grass'}else move(t)
+}
+function resize(){let r=c.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);c.width=Math.floor(r.width*d);c.height=Math.floor(r.height*d);ctx.setTransform(d,0,0,d,0,0);draw()}
+function draw(){let r=c.getBoundingClientRect(),tw=r.width/W,th=r.height/H;ctx.clearRect(0,0,r.width,r.height);for(let y=0;y<H;y++)for(let x=0;x<W;x++){let t=map[y][x],colors={grass:'#547d45',tree:'#28563a',berry:'#9b5571',water:'#367da0',stone:'#858b83'};ctx.fillStyle=colors[t];ctx.fillRect(x*tw,y*th,tw-1,th-1);if(t==='tree'){ctx.fillStyle='#183e2b';ctx.beginPath();ctx.arc((x+.5)*tw,(y+.45)*th,Math.min(tw,th)*.27,0,7);ctx.fill()}if(t==='berry'){ctx.fillStyle='#f1b5d0';ctx.beginPath();ctx.arc((x+.5)*tw,(y+.5)*th,Math.min(tw,th)*.12,0,7);ctx.fill()}}
+ctx.fillStyle='#f4d35e';ctx.beginPath();ctx.arc((a.x+.5)*tw,(a.y+.5)*th,Math.min(tw,th)*.32,0,7);ctx.fill();ctx.fillStyle='#3a2d18';ctx.beginPath();ctx.arc((a.x+.5)*tw,(a.y+.45)*th,Math.min(tw,th)*.1,0,7);ctx.fill();if(a.shelter){ctx.strokeStyle='#e7c27b';ctx.lineWidth=3;ctx.strokeRect((a.x-.45)*tw,(a.y-.45)*th,tw*.9,th*.9)}}
+function update(){el('day').textContent='День '+a.day+' · шаг '+a.steps;el('goal').textContent='Решение ИИ: '+a.goal;el('stats').innerHTML=['Здоровье '+Math.ceil(a.hp)+'%','Голод '+Math.ceil(a.hunger)+'%','Жажда '+Math.ceil(a.thirst)+'%','Энергия '+Math.ceil(a.energy)+'%'].map(s=>s+'<div class="bar"><i style="width:'+parseInt(s.match(/\d+/)[0])+'%"></i></div>').join('');el('resources').textContent='🪵 '+a.wood+'   🍓 '+a.food+'   💧 '+a.water;el('shelter').textContent='Убежище: '+(a.shelter?'построено':'нет');el('log').innerHTML=logs.map(x=>'<div>'+x+'</div>').join('');}
+function loop(){if(running){timer++;if(timer%8===0){tick++;act();if(tick%100===0){a.day++;log('Наступил новый день.')}}}draw();update();setTimeout(loop,650)}
+function save(){localStorage.setItem('alive-save',JSON.stringify({a,map,logs}));log('Состояние мира сохранено на телефоне.')}
+function load(){let s=localStorage.getItem('alive-save');if(!s){log('Сохранение не найдено.');return}try{let d=JSON.parse(s);a=d.a;map=d.map;logs=d.logs||[];running=true;log('Мир восстановлен из памяти устройства.')}catch(e){log('Ошибка чтения сохранения.')}update()}
+el('pause').onclick=()=>{running=!running;el('pause').textContent=running?'Пауза':'Продолжить'};el('save').onclick=save;el('load').onclick=load;el('reset').onclick=()=>{a={x:14,y:9,hp:100,hunger:8,thirst:5,energy:95,wood:0,food:0,water:0,shelter:false,day:1,goal:'Изучает местность',memory:[],steps:0};logs=[];tick=0;timer=0;running=true;makeWorld();log('Новый мир создан. ИИ начинает самостоятельное выживание.');update()};
+makeWorld();log('ИИ проснулся в незнакомом лесу.');log('Первая задача — найти воду и пищу.');new ResizeObserver(resize).observe(c);loop();
+})();</script></body></html>

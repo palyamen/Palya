@@ -4,7 +4,8 @@ const ui={day:$('day'),goal:$('goal'),people:$('people'),resources:$('resources'
 const T={GRASS:0,FOREST:1,WATER:2,ROCK:3,BERRY:4,DIRT:5,CROP:6};
 const NAMES_M=['Илья','Марк','Егор','Лев','Тимур','Роман','Даня','Миша','Артур','Кирилл'],NAMES_F=['Мира','Ася','Лада','Ева','Ника','Соня','Вера','Лиза','Арина','Тася'];
 const W=72,H=52,S=32;
-let world,terrain=[],objects=[],animals=[],logs=[],selected=null,running=true,speed=1,tick=0,last=0,camera={x:0,y:0},drag=null,weather='Ясно',season=0,toast='',toastUntil=0;\nconst ambience=new Audio('forest-ambience.wav');ambience.loop=true;ambience.volume=.24;let soundOn=false;
+let world,terrain=[],objects=[],animals=[],logs=[],selected=null,running=true,speed=1,tick=0,last=0,camera={x:0,y:0},drag=null,weather='Ясно',season=0,toast='',toastUntil=0;
+const ambience=new Audio('forest-ambience.wav');ambience.loop=true;ambience.volume=.24;let soundOn=false;
 const rand=n=>Math.floor(Math.random()*n),chance=n=>Math.random()<n,choose=a=>a[rand(a.length)],clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),dist=(a,b)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y),uid=()=>Math.random().toString(36).slice(2,10);
 function say(s){logs.unshift('День '+world.day+' · '+s);logs=logs.slice(0,70);toast=s;toastUntil=Date.now()+2600}
 function tile(x,y){return x>=0&&y>=0&&x<W&&y<H?terrain[y][x]:T.WATER}

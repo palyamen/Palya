@@ -14,7 +14,7 @@ function makeTerrain(){
  for(let k=0;k<9;k++){let x=rand(W),y=rand(H),r=3+rand(5);for(let yy=-r;yy<=r;yy++)for(let xx=-r;xx<=r;xx++)if(x+xx>=0&&y+yy>=0&&x+xx<W&&y+yy<H&&xx*xx+yy*yy<r*r)terrain[y+yy][x+xx]=T.WATER}
  for(let k=0;k<150;k++){let x=rand(W),y=rand(H);if(terrain[y][x]===T.GRASS)terrain[y][x]=T.BERRY}
 }
-function makePerson(name,sex,x,y,age){return{id:uid(),name,sex,x,y,age:age||20,hp:100,hunger:8,thirst:6,energy:95,warmth:90,mood:70,skill:rand(3),traits:choose(['добрый','смелый','осторожный','вспыльчивый','трудолюбивый','любознательный']),partner:null,parents:[],children:[],home:null,job:choose(['собиратель','строитель','фермер','исследователь']),goal:'Осматривает окрестности',state:'idle',cool:0,anger:0,pregnant:0,inventory:{food:0,wood:0,stone:0,herb:0},alive:true,walk:0,dir:1,ageStage:'adult'}}
+function makePerson(name,sex,x,y,age){return{id:uid(),name,sex,x,y,age:age===undefined?20:age,hp:100,hunger:8,thirst:6,energy:95,warmth:90,mood:70,skill:rand(3),traits:choose(['добрый','смелый','осторожный','вспыльчивый','трудолюбивый','любознательный']),partner:null,parents:[],children:[],home:null,job:choose(['собиратель','строитель','фермер','исследователь']),goal:'Осматривает окрестности',state:'idle',cool:0,anger:0,pregnant:0,inventory:{food:0,wood:0,stone:0,herb:0},alive:true,walk:0,dir:1,ageStage:'adult'}}
 function newWorld(){
  world={day:1,hour:8,wood:24,food:28,water:30,stone:10,herbs:4,houses:[],fields:[],camp:{x:W/2|0,y:H/2|0},law:'Совет старейшин',population:[],tech:{farming:0,building:0,medicine:0},generation:1,dead:0,season:0};
  makeTerrain();objects=[];animals=[];logs=[];selected=null;tick=0;camera.x=world.camp.x*S- canvas.clientWidth/2;camera.y=world.camp.y*S-canvas.clientHeight/2;

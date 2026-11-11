@@ -1,10 +1,10 @@
 (()=>{'use strict';
 const canvas=document.getElementById('world'),ctx=canvas.getContext('2d'),$=id=>document.getElementById(id);
-const ui={day:$('day'),goal:$('goal'),people:$('people'),resources:$('resources'),law:$('law'),log:$('log'),pause:$('pause'),speed:$('speed'),save:$('save'),load:$('load'),reset:$('reset'),build:$('build'),farm:$('farm'),craft:$('craft'),lawBtn:$('lawBtn'),inspect:$('inspect')};
+const ui={day:$('day'),goal:$('goal'),people:$('people'),resources:$('resources'),law:$('law'),log:$('log'),pause:$('pause'),speed:$('speed'),save:$('save'),load:$('load'),reset:$('reset'),build:$('build'),farm:$('farm'),craft:$('craft'),lawBtn:$('lawBtn'),inspect:$('inspect'),sound:$('sound')};
 const T={GRASS:0,FOREST:1,WATER:2,ROCK:3,BERRY:4,DIRT:5,CROP:6};
 const NAMES_M=['Илья','Марк','Егор','Лев','Тимур','Роман','Даня','Миша','Артур','Кирилл'],NAMES_F=['Мира','Ася','Лада','Ева','Ника','Соня','Вера','Лиза','Арина','Тася'];
 const W=72,H=52,S=32;
-let world,terrain=[],objects=[],animals=[],logs=[],selected=null,running=true,speed=1,tick=0,last=0,camera={x:0,y:0},drag=null,weather='Ясно',season=0,toast='',toastUntil=0;
+let world,terrain=[],objects=[],animals=[],logs=[],selected=null,running=true,speed=1,tick=0,last=0,camera={x:0,y:0},drag=null,weather='Ясно',season=0,toast='',toastUntil=0;\nconst ambience=new Audio('forest-ambience.wav');ambience.loop=true;ambience.volume=.24;let soundOn=false;
 const rand=n=>Math.floor(Math.random()*n),chance=n=>Math.random()<n,choose=a=>a[rand(a.length)],clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),dist=(a,b)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y),uid=()=>Math.random().toString(36).slice(2,10);
 function say(s){logs.unshift('День '+world.day+' · '+s);logs=logs.slice(0,70);toast=s;toastUntil=Date.now()+2600}
 function tile(x,y){return x>=0&&y>=0&&x<W&&y<H?terrain[y][x]:T.WATER}
@@ -122,7 +122,7 @@ canvas.addEventListener('pointerup',e=>{if(!drag)return;if(!drag.moved){let x=Ma
 ui.people.addEventListener('click',e=>{let el=e.target.closest('[data-id]');if(el){selected=el.dataset.id;let p=world.population.find(q=>q.id===selected);if(p){camera.x=clamp(p.x*S-canvas.clientWidth/2,0,W*S-canvas.clientWidth);camera.y=clamp(p.y*S-canvas.clientHeight/2,0,H*S-canvas.clientHeight)}renderUI()}});
 ui.pause.onclick=()=>{running=!running;ui.pause.textContent=running?'Пауза':'Продолжить'};
 ui.speed.onclick=()=>{speed=speed===1?2:speed===2?4:1;ui.speed.textContent='Скорость ×'+speed};
-ui.save.onclick=save;ui.load.onclick=load;ui.reset.onclick=()=>{if(confirm('Начать новый мир? Старое сохранение останется.'))newWorld()};
+ui.sound.onclick=()=>{soundOn=!soundOn;if(soundOn){ambience.play().catch(()=>{soundOn=false;ui.sound.textContent='🔇 Звук'})}else ambience.pause();ui.sound.textContent=soundOn?'🔊 Звук':'🔇 Звук'};ui.save.onclick=save;ui.load.onclick=load;ui.reset.onclick=()=>{if(confirm('Начать новый мир? Старое сохранение останется.'))newWorld()};
 ui.build.onclick=()=>actButton(()=>{let p=world.population.find(q=>q.id===selected&&q.alive)||world.population.find(q=>q.alive);if(p&&makeHouse(p)){}else say('Для дома нужно 12 дерева и 3 камня.')});
 ui.farm.onclick=()=>actButton(()=>{if(world.food<8){say('Нужно 8 еды, чтобы разбить огород.');return}world.food-=8;world.fields.push({x:world.camp.x+rand(5)-2,y:world.camp.y+rand(5)-2,progress:0});say('Поселенцы разбили огород. Урожай появится через несколько игровых дней.')});
 ui.craft.onclick=()=>actButton(()=>{if(world.wood>=4&&world.stone>=2){world.wood-=4;world.stone-=2;world.tech.medicine++;say('Созданы инструменты и аптечные принадлежности. Навык поселения растёт.')}else say('Для инструментов нужно 4 дерева и 2 камня.')});

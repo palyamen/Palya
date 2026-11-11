@@ -31,7 +31,7 @@ function pair(a,b){a.partner=b.id;b.partner=a.id;a.mood=100;b.mood=100;say(a.nam
 function giveBirth(m){let dad=world.population.find(q=>q.id===m.partner);if(!dad||!dad.alive||world.population.length>35)return;m.pregnant=0;let sex=chance(.5)?'М':'Ж',b=makePerson(choose(sex==='М'?NAMES_M:NAMES_F),sex,m.x,m.y,0);b.parents=[m.id,dad.id];m.children.push(b.id);dad.children.push(b.id);world.population.push(b);world.generation++;say('В семье '+m.name+' и '+dad.name+' родился ребёнок '+b.name+'.')}
 function conflict(a,b){if(!a.alive||!b.alive)return;a.anger=0;b.anger=0;a.mood-=18;b.mood-=22;b.hp-=12+rand(16);a.goal='Ссорится с '+b.name;b.goal='Защищается от '+a.name;say(a.name+' и '+b.name+' подрались.');if(b.hp<=0){b.alive=false;world.dead++;say(b.name+' погиб(ла) после драки. Совет расследует конфликт.')}else if(world.law==='Жёсткий закон'&&b.hp<20&&chance(.1)){b.alive=false;world.dead++;say('Тяжёлое преступление закончилось гибелью '+b.name+'.')} }
 function ai(p){
- if(!p.alive)return;p.age+=.00018;p.hunger=clamp(p.hunger+.22,0,100);p.thirst=clamp(p.thirst+.31,0,100);p.energy=clamp(p.energy-.10,0,100);p.warmth=clamp(p.warmth-(weather==='Дождь'?.2:.05),0,100);p.cool=Math.max(0,p.cool-1);
+ if(!p.alive)return;p.age+=.003;p.hunger=clamp(p.hunger+.22,0,100);p.thirst=clamp(p.thirst+.31,0,100);p.energy=clamp(p.energy-.10,0,100);p.warmth=clamp(p.warmth-(weather==='Дождь'?.2:.05),0,100);p.cool=Math.max(0,p.cool-1);
  if(p.hunger>85||p.thirst>88||p.warmth<10)p.hp-=.7;if(p.hp<=0){p.alive=false;world.dead++;say(p.name+' умер(ла) от истощения.');return}
  if(p.age<13)p.ageStage='child';else if(p.age<18)p.ageStage='teen';else p.ageStage='adult';
  if(p.ageStage==='child'){p.goal='Играет возле дома';p.energy=clamp(p.energy+.5,0,100);return}
@@ -128,6 +128,6 @@ ui.farm.onclick=()=>actButton(()=>{if(world.food<8){say('Нужно 8 еды, ч
 ui.craft.onclick=()=>actButton(()=>{if(world.wood>=4&&world.stone>=2){world.wood-=4;world.stone-=2;world.tech.medicine++;say('Созданы инструменты и аптечные принадлежности. Навык поселения растёт.')}else say('Для инструментов нужно 4 дерева и 2 камня.')});
 ui.lawBtn.onclick=()=>actButton(()=>{world.law=world.law==='Совет старейшин'?'Жёсткий закон':'Совет старейшин';say('Новый порядок: '+world.law+'.')});
 window.addEventListener('resize',resize);
-function loop(){let now=Date.now();if(running){let n=speed;while(n--)step()}draw();if(tick-last>=5){renderUI();last=tick}requestAnimationFrame(loop)}
+let previousFrame=0,accumulator=0;function loop(now){if(!previousFrame)previousFrame=now;let elapsed=Math.min(100,now-previousFrame);previousFrame=now;if(running){accumulator+=elapsed;let interval=500/speed;while(accumulator>=interval){step();accumulator-=interval}}draw();if(tick-last>=2){renderUI();last=tick}requestAnimationFrame(loop)}
 newWorld();requestAnimationFrame(loop);
 })();

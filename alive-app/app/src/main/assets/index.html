@@ -29,8 +29,53 @@ let type,goal;if(a.thirst>35||a.water<2){type='water';goal='Ищет воду'}e
 a.goal=goal;let t=nearest(type);if(!t){wander();return}if(t.d<=1){if(type==='water'){a.water+=2;log('Нашёл воду и наполнил запас.')}if(type==='berry'){a.food+=2;log('Собрал лесные ягоды.')}if(type==='tree'){a.wood+=2;log('Добыл древесину.')}map[t.y][t.x]='grass'}else move(t)
 }
 function resize(){let r=c.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);c.width=Math.floor(r.width*d);c.height=Math.floor(r.height*d);ctx.setTransform(d,0,0,d,0,0);draw()}
-function draw(){let r=c.getBoundingClientRect(),tw=r.width/W,th=r.height/H;ctx.clearRect(0,0,r.width,r.height);for(let y=0;y<H;y++)for(let x=0;x<W;x++){let t=map[y][x],colors={grass:'#547d45',tree:'#28563a',berry:'#9b5571',water:'#367da0',stone:'#858b83'};ctx.fillStyle=colors[t];ctx.fillRect(x*tw,y*th,tw-1,th-1);if(t==='tree'){ctx.fillStyle='#183e2b';ctx.beginPath();ctx.arc((x+.5)*tw,(y+.45)*th,Math.min(tw,th)*.27,0,7);ctx.fill()}if(t==='berry'){ctx.fillStyle='#f1b5d0';ctx.beginPath();ctx.arc((x+.5)*tw,(y+.5)*th,Math.min(tw,th)*.12,0,7);ctx.fill()}}
-ctx.fillStyle='#f4d35e';ctx.beginPath();ctx.arc((a.x+.5)*tw,(a.y+.5)*th,Math.min(tw,th)*.32,0,7);ctx.fill();ctx.fillStyle='#3a2d18';ctx.beginPath();ctx.arc((a.x+.5)*tw,(a.y+.45)*th,Math.min(tw,th)*.1,0,7);ctx.fill();if(a.shelter){ctx.strokeStyle='#e7c27b';ctx.lineWidth=3;ctx.strokeRect((a.x-.45)*tw,(a.y-.45)*th,tw*.9,th*.9)}}
+function draw(){
+ const r=c.getBoundingClientRect(),tw=r.width/W,th=r.height/H,unit=Math.min(tw,th);
+ ctx.clearRect(0,0,r.width,r.height);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const t=map[y][x],px=x*tw,py=y*th,cx=px+tw/2,cy=py+th/2;
+  ctx.fillStyle=((x*7+y*11)%5===0)?'#547d43':'#496f3d';ctx.fillRect(px,py,tw+.5,th+.5);
+  ctx.fillStyle='rgba(205,220,137,.13)';
+  for(let k=0;k<3;k++){let gx=px+((x*13+y*7+k*17)%Math.max(8,tw)),gy=py+((y*9+x*5+k*11)%Math.max(8,th));ctx.fillRect(gx,gy,1.5,3)}
+  if(t==='water'){
+   ctx.fillStyle='#287b9a';ctx.beginPath();ctx.ellipse(cx,cy,tw*.48,th*.44,0,0,Math.PI*2);ctx.fill();
+   ctx.strokeStyle='rgba(190,235,245,.65)';ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(cx-tw*.22,cy-th*.08);ctx.quadraticCurveTo(cx,cy-th*.18,cx+tw*.2,cy-th*.07);ctx.stroke();
+   ctx.beginPath();ctx.moveTo(cx-tw*.12,cy+th*.16);ctx.quadraticCurveTo(cx,cy+th*.08,cx+tw*.13,cy+th*.16);ctx.stroke();
+  } else if(t==='tree'){
+   ctx.fillStyle='rgba(20,35,20,.28)';ctx.beginPath();ctx.ellipse(cx+tw*.05,cy+th*.28,tw*.42,th*.18,0,0,7);ctx.fill();
+   ctx.fillStyle='#76502f';ctx.fillRect(cx-tw*.09,cy-th*.02,tw*.18,th*.43);
+   ctx.fillStyle='#1d4b32';ctx.beginPath();ctx.arc(cx,cy-th*.12,unit*.43,0,7);ctx.fill();
+   ctx.fillStyle='#2d6840';ctx.beginPath();ctx.arc(cx-tw*.13,cy-th*.2,unit*.29,0,7);ctx.fill();
+   ctx.fillStyle='#39794a';ctx.beginPath();ctx.arc(cx+tw*.13,cy-th*.22,unit*.27,0,7);ctx.fill();
+   ctx.fillStyle='rgba(153,190,105,.35)';ctx.beginPath();ctx.arc(cx-tw*.12,cy-th*.29,unit*.12,0,7);ctx.fill();
+  } else if(t==='berry'){
+   ctx.fillStyle='rgba(20,35,20,.25)';ctx.beginPath();ctx.ellipse(cx,cy+th*.2,tw*.34,th*.13,0,0,7);ctx.fill();
+   ctx.fillStyle='#315f36';ctx.beginPath();ctx.arc(cx,cy,unit*.31,0,7);ctx.fill();
+   for(let k=0;k<5;k++){let ang=k*1.25;ctx.fillStyle='#d94f72';ctx.beginPath();ctx.arc(cx+Math.cos(ang)*unit*.19,cy+Math.sin(ang)*unit*.16,unit*.07,0,7);ctx.fill()}
+   ctx.fillStyle='#9fc66b';ctx.beginPath();ctx.arc(cx-unit*.08,cy-unit*.2,unit*.1,0,7);ctx.fill();
+  } else if(t==='stone'){
+   ctx.fillStyle='#858e87';ctx.beginPath();ctx.moveTo(cx-tw*.28,cy+th*.18);ctx.lineTo(cx-tw*.2,cy-th*.16);ctx.lineTo(cx+tw*.12,cy-th*.25);ctx.lineTo(cx+tw*.3,cy+th*.05);ctx.lineTo(cx+tw*.2,cy+th*.22);ctx.closePath();ctx.fill();
+   ctx.fillStyle='rgba(255,255,255,.22)';ctx.beginPath();ctx.moveTo(cx-tw*.12,cy-th*.12);ctx.lineTo(cx+tw*.1,cy-th*.2);ctx.lineTo(cx+tw*.18,cy-th*.02);ctx.closePath();ctx.fill();
+  }
+ }
+ const px=(a.x+.5)*tw,py=(a.y+.5)*th;
+ ctx.fillStyle='rgba(10,20,12,.38)';ctx.beginPath();ctx.ellipse(px,py+unit*.28,unit*.29,unit*.13,0,0,7);ctx.fill();
+ ctx.strokeStyle='#34291f';ctx.lineWidth=Math.max(2,unit*.09);ctx.lineCap='round';
+ ctx.beginPath();ctx.moveTo(px-unit*.08,py+unit*.13);ctx.lineTo(px-unit*.12,py+unit*.32);ctx.moveTo(px+unit*.08,py+unit*.13);ctx.lineTo(px+unit*.13,py+unit*.32);ctx.stroke();
+ ctx.fillStyle='#b56d3e';ctx.fillRect(px-unit*.25,py-unit*.12,unit*.13,unit*.28);
+ ctx.fillStyle='#d6a24e';ctx.beginPath();ctx.roundRect(px-unit*.18,py-unit*.16,unit*.36,unit*.4,unit*.1);ctx.fill();
+ ctx.fillStyle='#e8bd87';ctx.beginPath();ctx.arc(px,py-unit*.27,unit*.17,0,7);ctx.fill();
+ ctx.fillStyle='#493326';ctx.beginPath();ctx.arc(px,py-unit*.32,unit*.18,Math.PI,Math.PI*2);ctx.fill();ctx.fillRect(px-unit*.17,py-unit*.32,unit*.34,unit*.07);
+ ctx.fillStyle='#29251d';ctx.beginPath();ctx.arc(px+unit*.06,py-unit*.27,Math.max(1,unit*.025),0,7);ctx.fill();
+ const labels={'Ищет воду':'💧','Пьёт воду':'💧','Ищет пищу':'🍓','Запасает ягоды':'🍓','Собирает древесину':'🪓','Отдыхает':'Zz','Исследует окрестности':'👀','Ест найденную пищу':'🍓','Построил убежище':'🏕️'};
+ const tag=labels[a.goal]||'…';
+ ctx.font='bold '+Math.max(10,unit*.34)+'px system-ui';const twid=ctx.measureText(tag+' '+a.goal).width+12;
+ const bx=Math.max(3,Math.min(r.width-twid-3,px-twid/2)),by=Math.max(3,py-unit*.9);
+ ctx.fillStyle='rgba(18,31,22,.88)';ctx.beginPath();ctx.roundRect(bx,by,twid,Math.max(20,unit*.48),7);ctx.fill();
+ ctx.fillStyle='#fff4d6';ctx.fillText(tag+' '+a.goal,bx+6,by+Math.max(14,unit*.32));
+ ctx.fillStyle='rgba(15,28,19,.72)';ctx.beginPath();ctx.roundRect(8,8,Math.min(150,r.width*.48),25,7);ctx.fill();
+ ctx.fillStyle='#f0f4df';ctx.font='bold 11px system-ui';ctx.fillText('🌲 ЛЕС  ·  🧍 ЖИТЕЛЬ',16,25);
+}
 function update(){el('day').textContent='День '+a.day+' · шаг '+a.steps;el('goal').textContent='Решение ИИ: '+a.goal;el('stats').innerHTML=['Здоровье '+Math.ceil(a.hp)+'%','Голод '+Math.ceil(a.hunger)+'%','Жажда '+Math.ceil(a.thirst)+'%','Энергия '+Math.ceil(a.energy)+'%'].map(s=>s+'<div class="bar"><i style="width:'+parseInt(s.match(/\d+/)[0])+'%"></i></div>').join('');el('resources').textContent='🪵 '+a.wood+'   🍓 '+a.food+'   💧 '+a.water;el('shelter').textContent='Убежище: '+(a.shelter?'построено':'нет');el('log').innerHTML=logs.map(x=>'<div>'+x+'</div>').join('');}
 function loop(){if(running){timer++;if(timer%8===0){tick++;act();if(tick%100===0){a.day++;log('Наступил новый день.')}}}draw();update();setTimeout(loop,650)}
 function save(){localStorage.setItem('alive-save',JSON.stringify({a,map,logs}));log('Состояние мира сохранено на телефоне.')}

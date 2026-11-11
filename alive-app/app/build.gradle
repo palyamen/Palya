@@ -1,0 +1,6 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'com.astra.alive'
+ compileSdk 35
+ defaultConfig { applicationId 'com.astra.alive'; minSdk 23; targetSdk 28; versionCode 1; versionName '0.1' }
+}

@@ -1,78 +1,27 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#101910"><title>ALIVE 0.2</title>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#101910"><title>ALIVE 0.3 · Живой мир</title>
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101910;color:#edf3df;font-family:system-ui,Arial}
-#app{height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:9px;padding:9px}
-#world{width:100%;height:100%;display:block;background:#294b30;border:1px solid #657c55;border-radius:12px;touch-action:manipulation}
-aside{display:flex;flex-direction:column;gap:8px;min-width:0;overflow:hidden}.card{background:#1b2a20;border:1px solid #435c43;border-radius:11px;padding:9px;min-width:0}
-.title{font-weight:900;letter-spacing:1px;color:#c5e58a}.muted{color:#a8b9a0;font-size:10px}.stat{font-size:12px;line-height:1.45}
-#goal{font-size:13px;font-weight:800;color:#f3d58a;margin-top:5px;white-space:normal}
-#people{font-size:11px;line-height:1.4;max-height:125px;overflow:auto}.person{padding:4px 0;border-bottom:1px solid #344638}
-#resources{font-size:12px;line-height:1.6}.log{font-size:11px;line-height:1.4;overflow:auto;flex:1;min-height:80px}.log div{border-bottom:1px solid #344638;padding:3px 0}
-.buttons{display:grid;grid-template-columns:1fr 1fr;gap:5px}button{background:#b8d77b;color:#1a2818;border:0;border-radius:8px;padding:9px 5px;font-weight:800;font-size:12px}button.secondary{background:#344b38;color:#e4efdb;border:1px solid #60765b}
-@media(max-width:700px){#app{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;padding:5px;gap:5px}aside{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto minmax(65px,1fr) auto;gap:5px;overflow:hidden}.card{padding:6px}.peoplecard{grid-column:1;grid-row:2}.resourcecard{grid-column:2;grid-row:2}.logcard{grid-column:1/3;grid-row:3}.buttons{grid-column:1/3;grid-row:4}.log{max-height:78px}.stat{font-size:10px}.title{font-size:12px}#people{max-height:82px;font-size:10px}#goal{font-size:11px}}
-</style></head><body><div id="app"><canvas id="world"></canvas><aside>
-<section class="card"><div class="title">ALIVE 0.2 · ЖИВОЙ МИР</div><div class="muted">2D · OFFLINE · АВТОНОМНАЯ СИМУЛЯЦИЯ</div><div id="day" class="stat">День 1</div><div id="goal">Мир просыпается…</div></section>
-<section class="card peoplecard"><div class="title">ЖИТЕЛИ</div><div id="people"></div></section>
-<section class="card resourcecard"><div class="title">ПОСЕЛЕНИЕ</div><div id="resources"></div><div class="muted" id="law">Закон: мирное поселение</div></section>
-<section class="card logcard"><div class="title">ЛЕТОПИСЬ МИРА</div><div id="log" class="log"></div></section>
-<div class="buttons"><button id="pause">Пауза</button><button id="save" class="secondary">Сохранить</button><button id="load" class="secondary">Загрузить</button><button id="reset" class="secondary">Новый мир</button></div>
-</aside></div>
-<script>
-(()=>{'use strict';
-const canvas=document.getElementById('world'),ctx=canvas.getContext('2d'),W=26,H=18;
-const $=id=>document.getElementById(id),rnd=n=>Math.floor(Math.random()*n),pick=a=>a[rnd(a.length)];
-let map=[],running=true,step=0,logs=[],lastTime=0,world={day:1,wood:12,food:14,water:14,houses:0,law:'Мирный договор',population:[]};
-const namesM=['Илья','Марк','Егор','Лев','Тимур','Роман'],namesF=['Мира','Ася','Лада','Ева','Ника','Соня'];
-function person(name,sex,x,y,age=22){return{id:Math.random().toString(36).slice(2,9),name,sex,x,y,age,hp:100,hunger:10,thirst:8,energy:90,mood:70,partner:null,parents:[],children:[],home:null,goal:'Осматривается',alive:true,traits:pick(['добрый','смелый','осторожный','вспыльчивый','трудолюбивый']),pregnant:0,anger:0}}
-function log(s){logs.unshift('День '+world.day+' · '+s);logs=logs.slice(0,45)}
-function tile(t){return Array.from({length:H},(_,y)=>map[y].map((v,x)=>v===t?{x,y}:null)).flat().filter(Boolean)}
-function makeMap(){map=Array.from({length:H},()=>Array.from({length:W},()=>{let n=Math.random();return n<.13?'tree':n<.18?'berry':n<.21?'water':n<.24?'stone':'grass'}));}
-function near(p,type){let list=tile(type),best=null,d=1e9;for(const q of list){let z=Math.abs(q.x-p.x)+Math.abs(q.y-p.y);if(z<d){d=z;best=q}}return best?{...best,d}:null}
-function move(p,t){if(!t)return;let dx=Math.sign(t.x-p.x),dy=Math.sign(t.y-p.y);let opts=Math.random()<.5?[[dx,0],[0,dy]]:[[0,dy],[dx,0]];for(const [x,y] of opts){let nx=p.x+x,ny=p.y+y;if((x||y)&&nx>=0&&ny>=0&&nx<W&&ny<H&&map[ny][nx]!=='water'){p.x=nx;p.y=ny;return}}}
-function wander(p){move(p,{x:rnd(W),y:rnd(H)})}
-function pair(a,b){a.partner=b.id;b.partner=a.id;a.mood=Math.min(100,a.mood+20);b.mood=Math.min(100,b.mood+20);log(a.name+' и '+b.name+' стали парой.')}
-function buildHome(p){if(world.wood>=8){world.wood-=8;world.houses++;p.home=world.houses;log(p.name+' построил дом №'+p.home+'.')}}
-function baby(mother,father){if(world.population.length>=18||world.food<5||world.water<4)return;world.food-=3;world.water-=2;const b=person(pick(mother.sex==='Ж'?namesF:namesM),mother.sex==='Ж'?'Ж':'М',mother.x,mother.y,0);b.parents=[mother.id,father.id];mother.children.push(b.id);father.children.push(b.id);world.population.push(b);mother.pregnant=0;log('Родился ребёнок '+b.name+'. Он продолжит род родителей.')}
-function fight(a,b){if(!a.alive||!b.alive)return;a.goal='Ссорится с '+b.name;b.goal='Защищается от '+a.name;a.anger=Math.max(0,a.anger-25);b.anger=Math.max(0,b.anger-20);a.mood-=18;b.mood-=20;const damage=8+rnd(18);b.hp-=damage;log(a.name+' и '+b.name+' подрались. '+b.name+' получил травму.');if(b.hp<=0){b.alive=false;log(b.name+' погиб в конфликте. Поселение скорбит.')}else if(a.traits==='вспыльчивый'&&Math.random()<.12){b.hp=0;b.alive=false;log('Смертельная расправа: '+b.name+' погиб от рук '+a.name+'.')} }
-function nearestOther(p){return world.population.filter(q=>q.alive&&q.id!==p.id&&Math.abs(q.x-p.x)+Math.abs(q.y-p.y)<=2)}
-function act(p){if(!p.alive)return;p.age+=0.0005;p.hunger=Math.min(100,p.hunger+.35);p.thirst=Math.min(100,p.thirst+.48);p.energy=Math.max(0,p.energy-.12);p.mood=Math.max(0,Math.min(100,p.mood+.05));
-if(p.hunger>92||p.thirst>92)p.hp-=.8;if(p.hp<=0){p.alive=false;log(p.name+' умер(ла) от истощения.');return}
-if(p.thirst>38&&world.water>0){world.water--;p.thirst=Math.max(0,p.thirst-34);p.goal='Пьёт воду';return}
-if(p.hunger>38&&world.food>0){world.food--;p.hunger=Math.max(0,p.hunger-32);p.goal='Ест';return}
-if(p.energy<14){p.energy=Math.min(100,p.energy+3);p.goal='Спит и отдыхает';return}
-const nearby=nearestOther(p);
-if(nearby.length){const q=nearby[0];if(p.partner===q.id){p.goal='Общается с '+q.name;if(p.sex==='Ж'&&p.age>18&&p.age<42&&Math.random()<.004&&p.children.length<3){p.pregnant=1;log(p.name+' ждёт ребёнка.')}if(p.pregnant>0&&Math.random()<.025)baby(p,q);return}
-if(p.anger>45||q.anger>65){fight(p,q);return}
-if(!p.partner&&!q.partner&&p.age>18&&q.age>18&&p.sex!==q.sex&&Math.random()<.08){pair(p,q);return}
-if(Math.random()<.06){p.goal='Разговаривает с '+q.name;p.mood=Math.min(100,p.mood+4);q.mood=Math.min(100,q.mood+3);return}
-}
-let target,kind;if(p.thirst>30||world.water<3){kind='water';p.goal='Ищет воду'}else if(p.hunger>30||world.food<4){kind='berry';p.goal='Собирает ягоды'}else if(world.houses<Math.ceil(world.population.filter(q=>q.alive).length/2)&&world.wood<18){kind='tree';p.goal='Рубит дерево'}else if(!p.home&&world.houses>0){p.home=1;p.goal='Ищет место для дома'}else if(p.partner&&p.home===null&&world.wood>=8){buildHome(p);p.goal='Строит семейный дом';return}else{p.goal='Исследует лес';wander(p);return}
-target=near(p,kind);if(!target){wander(p);return}if(target.d<=1){if(kind==='water'){world.water+=2;map[target.y][target.x]='grass'}if(kind==='berry'){world.food+=2;map[target.y][target.x]='grass'}if(kind==='tree'){world.wood+=2;map[target.y][target.x]='grass'} }else move(p,target)
-}
-function simulate(){step++;const living=world.population.filter(p=>p.alive);for(const p of living)act(p);
-if(step%70===0){world.day++;for(const p of world.population.filter(q=>q.alive)){if(p.age>65&&Math.random()<.03){p.alive=false;log(p.name+' умер(ла) от старости.')}if(p.partner&&!world.population.some(q=>q.id===p.partner&&q.alive))p.partner=null;}if(world.day%5===0)log('В поселении '+world.population.filter(p=>p.alive).length+' жителей.')}
-if(step%23===0&&Math.random()<.15){const candidates=world.population.filter(p=>p.alive&&p.traits==='вспыльчивый');if(candidates.length){const p=pick(candidates),q=pick(world.population.filter(x=>x.alive&&x.id!==p.id));if(q){p.anger+=35;q.anger+=15;log(p.name+' нарушил мирный договор и спровоцировал '+q.name+'. Старейшины требуют разбирательства.')}}}
-}
-function resize(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.floor(r.width*d);canvas.height=Math.floor(r.height*d);ctx.setTransform(d,0,0,d,0,0);draw()}
-function draw(){const r=canvas.getBoundingClientRect(),tw=r.width/W,th=r.height/H,u=Math.min(tw,th);ctx.clearRect(0,0,r.width,r.height);
-for(let y=0;y<H;y++)for(let x=0;x<W;x++){let t=map[y][x],px=x*tw,py=y*th,cx=px+tw/2,cy=py+th/2;ctx.fillStyle=(x*7+y*11)%5===0?'#547d43':'#496f3d';ctx.fillRect(px,py,tw+.5,th+.5);
-if(t==='water'){ctx.fillStyle='#287b9a';ctx.beginPath();ctx.ellipse(cx,cy,tw*.47,th*.42,0,0,7);ctx.fill();ctx.strokeStyle='#b8e6ef';ctx.beginPath();ctx.moveTo(cx-tw*.2,cy);ctx.lineTo(cx+tw*.2,cy);ctx.stroke()}
-if(t==='tree'){ctx.fillStyle='#76502f';ctx.fillRect(cx-tw*.07,cy,tw*.14,th*.35);ctx.fillStyle='#1d4b32';ctx.beginPath();ctx.arc(cx,cy-th*.12,u*.43,0,7);ctx.fill();ctx.fillStyle='#39794a';ctx.beginPath();ctx.arc(cx+tw*.12,cy-th*.2,u*.25,0,7);ctx.fill()}
-if(t==='berry'){ctx.fillStyle='#315f36';ctx.beginPath();ctx.arc(cx,cy,u*.27,0,7);ctx.fill();for(let k=0;k<4;k++){ctx.fillStyle='#e65a76';ctx.beginPath();ctx.arc(cx+Math.cos(k*1.6)*u*.16,cy+Math.sin(k*1.6)*u*.15,u*.06,0,7);ctx.fill()}}
-if(t==='stone'){ctx.fillStyle='#858e87';ctx.beginPath();ctx.ellipse(cx,cy,tw*.25,th*.18,0,0,7);ctx.fill()}}
-for(const p of world.population.filter(q=>q.alive)){const x=(p.x+.5)*tw,y=(p.y+.5)*th;ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(x,y+u*.24,u*.25,u*.1,0,0,7);ctx.fill();
-ctx.strokeStyle='#33271f';ctx.lineWidth=Math.max(2,u*.07);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x-u*.07,y+u*.08);ctx.lineTo(x-u*.1,y+u*.28);ctx.moveTo(x+u*.07,y+u*.08);ctx.lineTo(x+u*.1,y+u*.28);ctx.stroke();
-ctx.fillStyle=p.sex==='Ж'?'#bd6689':'#d2a34f';ctx.beginPath();ctx.roundRect(x-u*.14,y-u*.08,u*.28,u*.32,u*.07);ctx.fill();ctx.fillStyle='#edc69b';ctx.beginPath();ctx.arc(x,y-u*.2,u*.13,0,7);ctx.fill();ctx.fillStyle=p.sex==='Ж'?'#38252e':'#493326';ctx.beginPath();ctx.arc(x,y-u*.24,u*.14,Math.PI,Math.PI*2);ctx.fill();ctx.fillRect(x-u*.13,y-u*.24,u*.26,u*.08);
-if(p.partner){ctx.strokeStyle='#ff9eb6';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y-u*.43,u*.12,0,7);ctx.stroke()}
-ctx.fillStyle='#fff';ctx.font='bold '+Math.max(8,u*.19)+'px system-ui';ctx.textAlign='center';ctx.fillText(p.name,x,y+u*.48)}
-ctx.textAlign='left';ctx.fillStyle='rgba(15,28,19,.82)';ctx.beginPath();ctx.roundRect(7,7,Math.min(180,r.width*.65),25,7);ctx.fill();ctx.fillStyle='#f0f4df';ctx.font='bold 11px system-ui';ctx.fillText('🌲 ПОСЕЛЕНИЕ · '+world.population.filter(p=>p.alive).length+' жителей',14,24);
-}
-function update(){const live=world.population.filter(p=>p.alive);$('day').textContent='День '+world.day+' · поколение '+(1+Math.max(0,...world.population.map(p=>p.parents.length?1:0)));$('goal').textContent=live.length?live.slice(0,2).map(p=>p.name+': '+p.goal).join(' · '):'Поселение опустело';$('people').innerHTML=world.population.map(p=>'<div class="person">'+(p.alive?'🟢':'⚫')+' '+p.name+' · '+(p.sex==='Ж'?'женщина':'мужчина')+' · '+Math.floor(p.age)+' лет'+(p.partner?' · пара':'')+(p.children.length?' · детей: '+p.children.length:'')+'</div>').join('');$('resources').innerHTML='🪵 Древесина: '+world.wood+'<br>🍓 Еда: '+world.food+'<br>💧 Вода: '+world.water+'<br>🏠 Домов: '+world.houses+'<br>👥 Живы: '+live.length+' / '+world.population.length;$('law').textContent='Закон: '+world.law;$('log').innerHTML=logs.map(x=>'<div>'+x+'</div>').join('')}
-function loop(){if(running){lastTime++;if(lastTime%7===0)simulate()}draw();update();setTimeout(loop,650)}
-function save(){localStorage.setItem('alive-world',JSON.stringify({world,map,logs,step}));log('Мир сохранён в памяти телефона.')}
-function load(){try{const d=JSON.parse(localStorage.getItem('alive-world'));if(!d)throw 0;world=d.world;map=d.map;logs=d.logs||[];step=d.step||0;running=true;log('Сохранённый мир восстановлен.')}catch(e){log('Сохранение не найдено или повреждено.')}update()}
-function reset(){world={day:1,wood:12,food:14,water:14,houses:0,law:'Мирный договор',population:[]};map=[];logs=[];step=0;lastTime=0;makeMap();const man=person(pick(namesM),'М',12,8,25),woman=person(pick(namesF),'Ж',14,8,23);world.population.push(man,woman);log('В лесу появились первые двое жителей: '+man.name+' и '+woman.name+'.');log('Они могут познакомиться, создать семью и основать поселение.');running=true;update()}
-$('pause').onclick=()=>{running=!running;$('pause').textContent=running?'Пауза':'Продолжить'};$('save').onclick=save;$('load').onclick=load;$('reset').onclick=reset;
-makeMap();const man=person('Адам','М',12,8,25),woman=person('Ева','Ж',14,8,23);world.population.push(man,woman);log('Первые жители '+man.name+' и '+woman.name+' проснулись в лесу.');log('Их задача — выжить, найти общий язык и построить поселение.');if(window.ResizeObserver)new ResizeObserver(resize).observe(canvas);else window.addEventListener('resize',resize);resize();loop();
-})();</script></body></html>
+#app{height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:9px;padding:9px}
+#world{width:100%;height:100%;display:block;background:#294b30;border:1px solid #657c55;border-radius:13px;touch-action:none}
+aside{display:flex;flex-direction:column;gap:7px;min-width:0;overflow:hidden}
+.card{background:linear-gradient(145deg,#203326,#17251c);border:1px solid #435c43;border-radius:11px;padding:9px;min-width:0;box-shadow:0 3px 12px #0003}
+.title{font-weight:900;letter-spacing:1px;color:#c5e58a;font-size:13px}.muted{color:#a8b9a0;font-size:10px}.stat{font-size:12px;line-height:1.45}
+#goal{font-size:13px;font-weight:800;color:#f3d58a;margin-top:5px}
+#people{font-size:11px;line-height:1.4;max-height:170px;overflow:auto}.person{padding:5px 2px;border-bottom:1px solid #344638;cursor:pointer}.person:active{background:#314b37}
+#resources{font-size:12px;line-height:1.65}.log{font-size:11px;line-height:1.4;overflow:auto;flex:1;min-height:75px}.log div{border-bottom:1px solid #344638;padding:4px 0}
+.buttons{display:grid;grid-template-columns:1fr 1fr;gap:5px}button{background:linear-gradient(#c8e58b,#9dbf62);color:#1a2818;border:0;border-radius:8px;padding:9px 5px;font-weight:800;font-size:11px;box-shadow:0 2px 0 #526c3c}button.secondary{background:#344b38;color:#e4efdb;border:1px solid #60765b;box-shadow:none}
+.actionbuttons{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+#inspect{font-size:10px;color:#e9d8a4;line-height:1.35;margin-top:4px;min-height:25px}
+@media(max-width:700px){#app{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;padding:5px;gap:5px}aside{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto auto minmax(58px,1fr) auto;gap:5px;overflow:hidden}.topcard{grid-column:1/3;grid-row:1}.peoplecard{grid-column:1;grid-row:2/4}.resourcecard{grid-column:2;grid-row:2}.inspectcard{grid-column:2;grid-row:3}.logcard{grid-column:1/3;grid-row:4}.actionbuttons{grid-column:1/3;grid-row:5}.buttons{grid-column:1/3;grid-row:6}.card{padding:6px}.log{max-height:66px}.stat{font-size:10px}.title{font-size:11px}#people{max-height:105px;font-size:10px}#goal{font-size:11px;margin-top:2px}button{padding:8px 3px;font-size:10px}}
+</style></head><body><div id="app">
+<canvas id="world" aria-label="Карта живого мира"></canvas>
+<aside>
+<section class="card topcard"><div class="title">🌿 ALIVE 0.3 · ЖИВОЙ МИР</div><div class="muted">2D SURVIVAL · OFFLINE · АВТОНОМНАЯ ЦИВИЛИЗАЦИЯ</div><div id="day" class="stat">День 1</div><div id="goal">Мир просыпается…</div></section>
+<section class="card peoplecard"><div class="title">👥 ЖИТЕЛИ</div><div id="people"></div></section>
+<section class="card resourcecard"><div class="title">🏕 ПОСЕЛЕНИЕ</div><div id="resources"></div><div class="muted" id="law">Порядок: совет старейшин</div></section>
+<section class="card inspectcard"><div class="title">🔎 НАБЛЮДЕНИЕ</div><div id="inspect">Нажми на жителя или его имя, чтобы увидеть подробности.</div></section>
+<section class="card logcard"><div class="title">📜 ЛЕТОПИСЬ МИРА</div><div id="log" class="log"></div></section>
+<div class="actionbuttons"><button id="build">🏠 Построить дом</button><button id="farm">🌱 Разбить огород</button><button id="craft">🛠 Инструменты</button><button id="lawBtn" class="secondary">⚖ Сменить закон</button></div>
+<div class="buttons"><button id="pause">Пауза</button><button id="speed" class="secondary">Скорость ×1</button><button id="save" class="secondary">Сохранить</button><button id="load" class="secondary">Загрузить</button><button id="reset" class="secondary">Новый мир</button></div>
+</aside></div><script src="game.js"></script></body></html>

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Rainbow Keyboard</string>
+    <string name="keyboard_russian">Русский</string>
+    <string name="keyboard_english">English</string>
+</resources>
